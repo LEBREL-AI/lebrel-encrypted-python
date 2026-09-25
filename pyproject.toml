@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lebrel-encrypted"
+version = "0.2.0"
+authors = [{ name = "Lebrel" }]
+description = "Verified encrypted Python client for Lebrel DeepSeek V4 Flash Uncensored"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+dependencies = [
+  "cryptography==46.0.7",
+  "httpx==0.28.1",
+  "pyhpke==0.6.3",
+]
+
+[project.urls]
+Homepage = "https://lebrel.ai"
+Repository = "https://github.com/LEBREL-AI/lebrel-encrypted-python"
+Documentation = "https://lebrel.ai/docs"
+
+[project.scripts]
+lebrel-encrypted = "lebrel_encrypted.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest==8.4.2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lebrel_encrypted"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "examples", "tests", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

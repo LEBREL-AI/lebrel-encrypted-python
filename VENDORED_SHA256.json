@@ -1,0 +1,17 @@
+{
+  "source": "https://github.com/tinfoilsh/encrypted-http-body-protocol",
+  "revision": "6ae53f8b6270834ca1cb8c29f8d2a79e372bc4b0",
+  "directory": "python/src/ehbp",
+  "files": {
+    "__init__.py": "fa119ca7351e66c11959ba11f1e14cb845888a4947109ee45ba40b4679254797",
+    "_http.py": "b3673e9998dfbc2bb7bb23ac37a0519e990c5cf24fafd24da55068d4af303476",
+    "client.py": "084859bf4ee9330a6108f94e248570707ccbc3974cdf5946dd2c6894a20c1dfc",
+    "derive.py": "6a757686a62de420cdc36f9728fa6782b173cee80c06f407579403a3b7564569",
+    "errors.py": "ae0aeb6a5d314d34797eefcc984c156385fd3def5b2ad24018f66e692d7125e0",
+    "identity.py": "586d38654d9f658ce79e8fd7ca630daf3feef40c0afa9fefb1ff44d16e14d3cd",
+    "protocol.py": "cfa74c8f4f5238d9aaa5ec19ea7ab7d4d10df8030c48ae5754ac09cd8d219a54",
+    "py.typed": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "session.py": "1f655b1c27a8070d2ca1d79ba5394e2b15405f88c4259890af304bb11d0b7bb4",
+    "transport.py": "e48b0cbc08a471d739aa0749ca7840bbaf692b245a6499834e9db00f56d9b9a8"
+  }
+}

@@ -1,0 +1,6 @@
+.venv/
+.install-smoke/
+__pycache__/
+.pytest_cache/
+dist/
+*.egg-info/
