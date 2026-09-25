@@ -7,13 +7,14 @@ Lebrel's pinned Ed25519 signature before encrypting anything for a runtime key.
 Requires Python 3.9 or newer.
 
 ```sh
-python -m pip install https://lebrel.ai/sdk/lebrel-encrypted-python.zip
+python -m pip install lebrel-encrypted
 export LEBREL_API_KEY='your-Lebrel-API-key'
 ```
 
-The same archive can be reviewed, extracted and installed locally with
-`python -m pip install .`. The import is `lebrel_encrypted`; there is no need for
-the OpenAI package. The interface accepts OpenAI chat-completion parameters and
+The package is published on PyPI as `lebrel-encrypted`; the same source is at
+https://github.com/LEBREL-AI/lebrel-encrypted-python and, as a reviewable archive,
+at https://lebrel.ai/sdk/lebrel-encrypted-python.zip (`python -m pip install <archive>`).
+The import is `lebrel_encrypted`; there is no need for the OpenAI package. The interface accepts OpenAI chat-completion parameters and
 returns dictionaries.
 
 ```python
