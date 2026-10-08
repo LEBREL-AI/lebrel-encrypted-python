@@ -28,7 +28,7 @@ from . import proof
 from ._vendor.ehbp.errors import EHBPError
 from ._vendor.ehbp.identity import EncryptedRequest, ServerIdentity
 
-MODEL_ID = "lebrel/deepseek-v4-flash-uncensored"
+MODEL_ID = "lebrel/deepseek-v4.1-flash-uncensored"
 PRODUCTION_SIGNING_KEY = "beFZtSwt6FnlhIYbX636n7w3/gpaASIkRnIMx52XJwk="
 PRODUCTION_SIGNING_KEY_ID = "8f72beb9680a0f1911dce59d1fc103a0a89039998003715d35422d3020e5292d"
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
@@ -404,7 +404,7 @@ class Lebrel:
 
     def create(self, *, messages: List[Dict[str, Any]], model: str = MODEL_ID, stream: bool = False, **parameters: Any) -> Any:
         if model != MODEL_ID:
-            raise ValueError("This encrypted endpoint serves only DeepSeek V4 Flash Uncensored")
+            raise ValueError("This encrypted endpoint serves only DeepSeek V4.1 Flash Uncensored")
         if not isinstance(messages, list) or not messages or type(stream) is not bool:
             raise ValueError("messages must be a nonempty list and stream must be boolean")
         try:
@@ -515,7 +515,7 @@ class Lebrel:
         return proof.Receipt(document=document, checks=checks, verified=proof.all_passed(checks), manifest=served)
 
     def list_models(self) -> Dict[str, Any]:
-        """Fetch authenticated public metadata, filtered to the exact Flash model."""
+        """Fetch authenticated public metadata, filtered to the exact DeepSeek V4.1 Flash Uncensored model."""
         try:
             with self._http.stream("GET", self._origin + "/v1/models", headers={"Authorization": "Bearer " + self._key, "Accept": "application/json", "Accept-Encoding": "identity"}) as response:
                 if not 200 <= response.status_code < 300:
@@ -526,7 +526,7 @@ class Lebrel:
                 raise EncryptionError("Model metadata is invalid")
             matching = [entry for entry in entries if isinstance(entry, dict) and entry.get("id") == MODEL_ID]
             if len(matching) != 1:
-                raise EncryptionError("The expected Flash model is unavailable")
+                raise EncryptionError("The expected DeepSeek V4.1 Flash Uncensored model is unavailable")
             return {"object": "list", "data": matching}
         except httpx.HTTPError:
             raise TransportError("Could not retrieve authenticated model metadata") from None

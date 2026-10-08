@@ -4,9 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lebrel-encrypted"
-version = "0.2.0"
+version = "0.3.0"
 authors = [{ name = "Lebrel" }]
-description = "Verified encrypted Python client for Lebrel DeepSeek V4 Flash Uncensored"
+description = "Verified encrypted Python client for DeepSeek V4.1 Flash · Lebrel Uncensored"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"

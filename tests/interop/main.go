@@ -19,7 +19,7 @@ import (
 	"github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 )
 
-const model = "lebrel/deepseek-v4-flash-uncensored"
+const model = "lebrel/deepseek-v4.1-flash-uncensored"
 
 func main() {
 	id, err := identity.NewIdentity()

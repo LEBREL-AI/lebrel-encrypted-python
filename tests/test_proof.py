@@ -19,8 +19,8 @@ def sign(payload, signer=SIGNER):
 
 def manifest(**changes):
     payload = {
-        "version": 1, "edition": {"id": MODEL_ID, "name": "Lebrel DeepSeek V4 Flash Uncensored", "base_model": "deepseek-ai/DeepSeek-V4-Flash", "fingerprint_id": None},
-        "weights": {"repository": "lebrel/deepseek-v4-flash-uncensored", "revision": "a" * 64, "files": {"model.safetensors": {"sha256": "1" * 64, "size": 7}}, "total_bytes": 7},
+        "version": 1, "edition": {"id": MODEL_ID, "name": "DeepSeek V4.1 Flash · Lebrel Uncensored", "base_model": "deepseek-ai/DeepSeek-V4.1-Flash", "fingerprint_id": None},
+        "weights": {"repository": "lebrel/deepseek-v4.1-flash-uncensored", "revision": "a" * 64, "files": {"model.safetensors": {"sha256": "1" * 64, "size": 7}}, "total_bytes": 7},
         "quantization": {"method": "nvfp4", "weights_dtype": "fp8", "kv_cache_dtype": "fp8"}, "engine": {"name": "vllm", "version": "0.30.0", "image_digest": None},
         "tokenizer_sha256": "b" * 64, "chat_template_sha256": "c" * 64, "runtime": {"provider": "modal", "instance_id": "i" * 32, "sidecar_sha256": None},
         "attestation": None, "issued_at": 1000, "expires_at": 4600, "signing_key_id": KEY_ID,

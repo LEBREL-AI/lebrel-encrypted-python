@@ -1,8 +1,9 @@
 # Lebrel encrypted Python client
 
 Questions are encrypted locally for the verified runtime. Answers are decrypted
-locally. This client serves **`lebrel/deepseek-v4-flash-uncensored`** and verifies
-Lebrel's pinned Ed25519 signature before encrypting anything for a runtime key.
+locally. This client serves DeepSeek V4.1 Flash · Lebrel Uncensored
+(**`lebrel/deepseek-v4.1-flash-uncensored`**) and verifies Lebrel's pinned
+Ed25519 signature before encrypting anything for a runtime key.
 
 Requires Python 3.9 or newer.
 
@@ -28,9 +29,9 @@ with Lebrel() as client:  # reads LEBREL_API_KEY
     print(response["choices"][0]["message"]["content"])
 ```
 
-The model defaults to the exact Flash edition above. Another model ID is
-rejected locally. You can also pass `Lebrel(api_key="...")` or use the shorter
-`client.create(...)` interface.
+The model defaults to the exact DeepSeek V4.1 Flash edition above. Another
+model ID is rejected locally. You can also pass `Lebrel(api_key="...")` or use
+the shorter `client.create(...)` interface.
 
 ## OpenCode and other OpenAI-compatible applications
 
@@ -44,7 +45,7 @@ Configure your application with:
 
 - Base URL: `http://127.0.0.1:11437/v1`
 - API key: your usual Lebrel API key
-- Model: `lebrel/deepseek-v4-flash-uncensored`
+- Model: `lebrel/deepseek-v4.1-flash-uncensored`
 
 The adapter receives normal OpenAI JSON and SSE on loopback, then uses this SDK
 to encrypt requests to the public API and decrypt responses. It binds only to
@@ -58,7 +59,8 @@ from each application's request. Optional standalone use can read the key from
 `--api-key-file /private/path/to/key`; an incoming Bearer key takes precedence.
 The file must contain exactly one key. Do not put the key itself on the command
 line. The authenticated `/v1/models` route forwards metadata only for the exact
-Flash model. Stream disconnects close the encrypted upstream response.
+DeepSeek V4.1 Flash Uncensored model. Stream disconnects close the encrypted
+upstream response.
 
 `GET http://127.0.0.1:11437/healthz` requires no key and identifies the local
 adapter, SDK version, upstream, signing-key ID and loaded proxy source hash.

@@ -13,5 +13,5 @@ from .client import (
 )
 from .proof import Check, Manifest, Receipt
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = ["Lebrel", "MODEL_ID", "Completion", "CompletionStream", "Receipt", "Manifest", "Check", "LebrelError", "EncryptionError", "TransportError", "APIError", "StreamError"]
