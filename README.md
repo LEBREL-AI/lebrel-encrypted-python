@@ -187,10 +187,10 @@ SHA-256:
 8f72beb9680a0f1911dce59d1fc103a0a89039998003715d35422d3020e5292d
 ```
 
-The runtime signature authenticates Lebrel's encryption key. It is not hardware
-attestation or proof that the operator cannot access the model process's memory.
-Questions and answers are decrypted inside the inference runtime. The current
-standard Modal runtime remains administered by Lebrel.
+The runtime signature authenticates Lebrel's encryption key. Hardware attestation,
+which proves that the operator cannot access the model process's memory, is the
+layer that arrives with the public launch. Until then, questions and answers are
+decrypted inside an inference runtime administered by Lebrel.
 
 ## Reused implementation and dependencies
 
