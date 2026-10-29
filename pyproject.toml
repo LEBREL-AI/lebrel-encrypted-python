@@ -4,9 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lebrel-encrypted"
-version = "0.4.1"
+version = "0.4.2"
 authors = [{ name = "Lebrel" }]
-description = "Verified encrypted Python client for DeepSeek V4.1 Flash · Lebrel Uncensored"
+description = "Encrypted, verifiable Python client for DeepSeek V4.1 Flash · Lebrel Uncensored"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
@@ -17,6 +17,11 @@ classifiers = [
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Security :: Cryptography",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Typing :: Typed",
@@ -31,6 +36,8 @@ dependencies = [
 Homepage = "https://lebrel.ai"
 Repository = "https://github.com/LEBREL-AI/lebrel-encrypted-python"
 Documentation = "https://lebrel.ai/docs"
+Changelog = "https://github.com/LEBREL-AI/lebrel-encrypted-python/blob/main/CHANGELOG.md"
+Issues = "https://github.com/LEBREL-AI/lebrel-encrypted-python/issues"
 
 [project.scripts]
 lebrel-encrypted = "lebrel_encrypted.cli:main"
@@ -42,7 +49,7 @@ test = ["pytest==8.4.2"]
 packages = ["src/lebrel_encrypted"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "examples", "tests", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "pyproject.toml"]
+include = ["src", "examples", "tests", "README.md", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "VENDORED_SHA256.json", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

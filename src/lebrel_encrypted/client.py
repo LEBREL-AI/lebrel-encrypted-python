@@ -407,6 +407,11 @@ class Lebrel:
             raise ValueError("This encrypted endpoint serves only DeepSeek V4.1 Flash Uncensored")
         if not isinstance(messages, list) or not messages or type(stream) is not bool:
             raise ValueError("messages must be a nonempty list and stream must be boolean")
+        # `service_tier` (the OpenAI parameter): "priority" asks for Lebrel's priority tier, ahead of the line at its
+        # fixed price; it travels in a header, since the body is encrypted. Other values mean the default tier.
+        service_tier = parameters.pop("service_tier", None)
+        if service_tier is not None and not isinstance(service_tier, str):
+            raise ValueError("service_tier must be a string")
         try:
             plaintext = json.dumps(dict(parameters, model=model, messages=messages, stream=stream), ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
         except (ValueError, TypeError, UnicodeError):
@@ -430,6 +435,7 @@ class Lebrel:
             "Ehbp-Encapsulated-Key": encrypted.encapsulated_key.hex(),
             "X-Lebrel-Encryption-Key-Id": verified.key_id,
             "X-Lebrel-Request-Id": request_id,
+            **({"X-Lebrel-Service-Tier": "priority"} if service_tier == "priority" else {}),
         }, content=encrypted.body)
         try:
             response = self._http.send(request, stream=True)

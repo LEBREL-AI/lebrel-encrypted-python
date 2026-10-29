@@ -78,6 +78,22 @@ class BytesStream(httpx.SyncByteStream):
             yield self.data[offset:offset + 7]
 
 
+def test_service_tier_priority_travels_as_a_header():
+    tiers = []
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, stream=BytesStream(metadata()))
+        tiers.append(request.headers.get("x-lebrel-service-tier"))
+        return httpx.Response(422, stream=BytesStream(b"refused"))
+    with Lebrel("leb_live_test", _transport=httpx.MockTransport(handler), _clock=lambda: 1010, signing_public_key=base64.b64encode(PUBLIC_KEY).decode()) as client:
+        for tier in ("priority", "default", None):
+            with pytest.raises(APIError):
+                client.create(messages=[{"role": "user", "content": "hello"}], **({"service_tier": tier} if tier is not None else {}))
+        with pytest.raises(ValueError):
+            client.create(messages=[{"role": "user", "content": "hello"}], service_tier=3)
+    assert tiers == ["priority", None, None], "only the priority tier asks for anything; the body never carries service_tier"
+
+
 def test_request_headers_encryption_and_no_retry():
     calls = []
     def handler(request):

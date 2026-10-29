@@ -50,6 +50,9 @@ class MockClient:
         self.close()
     def create(self, **request):
         self.request = request
+        # A message that names a platform code is answered with that code, as the platform would.
+        if request["messages"][0]["content"] in ("queue_wait_timeout", "database_unavailable", "api_error"):
+            raise APIError(503, request["messages"][0]["content"])
         if request.get("stream"):
             self.stream = MockStream(request["messages"][0]["content"])
             return self.stream
@@ -85,6 +88,19 @@ def proxy():
 
 def body(mode="normal", stream=False):
     return {"model": MODEL_ID, "messages": [{"role": "user", "content": mode}], "stream": stream}
+
+
+def test_proxy_error_messages_name_the_cause(proxy):
+    _, url = proxy
+    headers = {"Authorization": "Bearer local-key"}
+    with httpx.Client() as client:
+        waited = client.post(url + "/v1/chat/completions", json=body("queue_wait_timeout"), headers=headers)
+        assert waited.status_code == 503 and waited.json()["error"]["code"] == "queue_wait_timeout"
+        assert waited.json()["error"]["message"].startswith("You were in line for the model and the wait ran out")
+        database = client.post(url + "/v1/chat/completions", json=body("database_unavailable"), headers=headers)
+        assert database.json()["error"]["message"].startswith("The platform's database could not be reached")
+        unknown = client.post(url + "/v1/chat/completions", json=body("api_error"), headers=headers)
+        assert unknown.json()["error"] == {"type": "proxy_error", "code": "api_error", "message": "Encrypted inference could not be completed"}
 
 
 def test_proxy_health_and_required_authorization(proxy):

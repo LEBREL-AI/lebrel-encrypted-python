@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 
-from .client import Lebrel, LebrelError, MAX_REQUEST_BYTES, _json
+from .client import APIError, Lebrel, LebrelError, MAX_REQUEST_BYTES, _json
 
 
 def main(argv=None):
@@ -34,8 +34,15 @@ def main(argv=None):
             else:
                 print(json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
         return 0
+    except APIError as error:
+        # The platform's reason, in its words (the same table the proxy answers with); never the response body.
+        from .proxy import ERROR_MESSAGES
+        code = error.code if isinstance(error.code, str) and error.code else "api_error"
+        message = ERROR_MESSAGES.get(code, "The encrypted request did not complete")
+        print(json.dumps({"error": {"type": "encrypted_inference_failed", "code": code, "message": message}}, ensure_ascii=False), file=sys.stderr)
+        return 1
     except (LebrelError, ValueError, TypeError, UnicodeError):
-        print('{"error":{"code":"encrypted_inference_failed","message":"The encrypted request did not complete"}}', file=sys.stderr)
+        print('{"error":{"type":"encrypted_inference_failed","code":"encrypted_inference_failed","message":"The encrypted request did not complete"}}', file=sys.stderr)
         return 1
     except (BrokenPipeError, KeyboardInterrupt):
         return 130

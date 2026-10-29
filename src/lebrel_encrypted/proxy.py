@@ -28,6 +28,30 @@ from .client import APIError, Lebrel, LebrelError, MAX_REQUEST_BYTES, MODEL_ID, 
 REQUEST_ID_HEADER = "X-Lebrel-Request-Id"
 RECEIPT_CHECK_HEADER = "X-Lebrel-Receipt-Check"
 PUBLIC_CATALOG_URL = "https://lebrel.ai/api/models"
+
+# What a tool shows its user for the platform's answers, by code (the client keeps the code, never the
+# server's own text): in line and the wait ran out, the line full, busy, the platform unreachable.
+ERROR_MESSAGES = {
+    "queue_wait_timeout": "You were in line for the model and the wait ran out (two minutes). Your client can retry; the line moves as answers finish.",
+    "queue_full": "The line for the model is full right now. Try again in a minute.",
+    "queue_lapsed": "Your place in line lapsed. Send the request again.",
+    "model_paused": "The model is paused until the next drop.",
+    "model_not_released": "The model is not available right now.",
+    "rate_limit_exceeded": "Too many requests at once for this account. Try again in a few seconds.",
+    "insufficient_quota": "Not enough balance for this request. Add funds and try again.",
+    "invalid_api_key": "The API key was refused.",
+    "database_unavailable": "The platform's database could not be reached just now. Try again in a moment.",
+    "authentication_unavailable": "The platform could not check the key just now. Try again in a moment.",
+    "billing_unavailable": "The platform could not open the hold for this request just now. Try again in a moment.",
+    "encrypted_inference_unavailable": "The model's node could not be reached just now. Try again in a moment.",
+    "inference_unavailable": "The model could not be reached just now. Try again in a moment.",
+    "queue_unavailable": "The line for the model could not be reached just now. Try again in a moment.",
+    "priority_unavailable": "Priority is not available for this key.",
+    "context_length_exceeded": "The prompt and the output limit exceed the model's context window.",
+    "max_output_tokens_exceeded": "The output limit asked for is above the model's.",
+    "model_not_found": "The model is not available for this key.",
+    "request_too_large": "The request is larger than the API accepts.",
+}
 _RECEIPT_PATH = re.compile(r"^/v1/receipts/([A-Za-z0-9_-]{8,128})$")
 # The request format each path speaks; every one ends as the same encrypted chat completion.
 _FORMATS = {"/v1/chat/completions": "openai", "/v1/responses": "responses", "/v1/messages": "anthropic", "/v1/messages/count_tokens": "anthropic"}
@@ -115,7 +139,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         elif fmt == "responses":
             body = openai_responses.error_body(status, code)
         else:
-            body = {"error": {"type": "proxy_error", "code": code, "message": "Encrypted inference could not be completed"}}
+            body = {"error": {"type": "proxy_error", "code": code, "message": ERROR_MESSAGES.get(code, "Encrypted inference could not be completed")}}
         data = json.dumps(body, separators=(",", ":")).encode()
         try:
             self.send_response(status)

@@ -49,10 +49,10 @@ Configure your application with:
 
 The adapter receives normal OpenAI JSON and SSE on loopback, then uses this SDK
 to encrypt requests to the public API and decrypt responses. It binds only to
-`127.0.0.1`; there is no network-bind option. The local hop is plaintext, so other
-processes with sufficient access on your computer remain within your trust
-boundary. Requests require `Authorization: Bearer ...` and JSON bodies with
-`Content-Length`. Browser-origin requests are rejected.
+`127.0.0.1`; there is no network-bind option. The hop between your application and
+the adapter is plaintext on loopback: any process on your computer that can reach
+it is inside your trust boundary. Requests require `Authorization: Bearer ...` and
+JSON bodies with `Content-Length`. Browser-origin requests are rejected.
 
 The adapter does not persist API keys or conversations. By default the key comes
 from each application's request. Optional standalone use can read the key from
@@ -81,8 +81,8 @@ lebrel-encrypted infer < request.json
 
 Equivalent: `python -m lebrel_encrypted infer < request.json`. The command reads
 JSON from stdin and the key from the environment. It writes a JSON response, or
-SSE when the input sets `"stream": true`. It never silently switches to the plain
-public API. On failure it exits nonzero and prints a generic error to stderr.
+SSE when the input sets `"stream": true`. On failure it exits nonzero and prints a
+JSON error to stderr with the platform's reason when there is one (see below).
 
 ## Streaming and cancellation
 
@@ -102,7 +102,7 @@ with Lebrel() as client:
         assert stream.completed
 ```
 
-Fully exhaust the stream to verify its completion. It requires a final
+Read the stream to its end to verify completion. It requires a final
 `finish_reason` for every observed choice, then an authenticated `[DONE]`, and
 rejects subsequent data or truncated encrypted frames. Partial output may have
 been displayed before a later error: do not treat it as a completed answer.
@@ -155,12 +155,42 @@ except (EncryptionError, StreamError, TransportError) as error:
     print(str(error))
 ```
 
-The client never automatically retries inference. A connection failure may occur
-after execution has begun, so a fresh application retry can incur a new charge.
-Each explicit request gets a new UUID in `X-Lebrel-Request-Id` and a fresh HPKE
-encapsulation. Redirects, plaintext successful responses and fallback to the
-plain API are prohibited. Error messages omit conversation content and ignore
-untrusted plaintext error bodies.
+The client never retries inference on its own. A connection failure may occur
+after execution has begun, so a fresh retry by your application can incur a new
+charge. Each request gets a new UUID in `X-Lebrel-Request-Id` and a fresh HPKE
+encapsulation. The client never follows redirects, never accepts a plaintext
+success response and never falls back to the unencrypted API. Error messages omit
+conversation content and ignore untrusted plaintext error bodies.
+
+### When a request cannot be served
+
+`APIError.code` carries the platform's reason, and the proxy and the command line
+put the same code and a plain message in the JSON error they answer with:
+
+| `code` | What it means |
+| --- | --- |
+| `queue_wait_timeout` | You were in line for the model and the wait ran out (two minutes). Retry; the line moves as answers finish. |
+| `queue_full` | The line for the model is full right now. Try again in a minute. |
+| `queue_lapsed` | Your place in line lapsed. Send the request again. |
+| `model_paused` | The model is paused until the next drop. |
+| `rate_limit_exceeded` | Too many requests at once for this account. |
+| `insufficient_quota` | Not enough balance for this request. |
+| `priority_unavailable` | Priority is not available for this key. |
+| `context_length_exceeded` | The prompt and the output limit exceed the model's context window. |
+| `inference_unavailable`, `billing_unavailable`, `authentication_unavailable`, `database_unavailable`, `encrypted_inference_unavailable` | The platform or the model's node could not be reached just now. Try again in a moment. |
+
+## Priority
+
+```python
+answer = client.create(messages=[...], service_tier="priority")
+```
+
+Priority is a setting of your account (Dashboard → Billing): with it on, every
+request goes ahead of the line at the priority price. The OpenAI `service_tier`
+parameter is accepted as well, in Python and through the proxy, and sends
+`X-Lebrel-Service-Tier: priority`. The response header `X-Lebrel-Price-Multiplier`
+names the price the request was admitted at, as a percentage of the list price,
+and `X-Lebrel-Queue-Wait-Ms` the time it waited in line.
 
 The default timeout is 900 seconds for cold starts; configure `Lebrel(timeout=...)`
 when needed. Environment HTTP proxy settings are disabled. HTTPS certificate
@@ -222,3 +252,9 @@ upstream revision (`GOTOOLCHAIN=go1.26.0`) and verifies real Python-to-Go encryp
 requests, JSON responses, streaming, truncation and failure handling. No GPU,
 production credentials or production API calls are used. Dependency and Go
 toolchain downloads are needed once unless already cached.
+
+## Changelog and license
+
+Changes by version are in [CHANGELOG.md](CHANGELOG.md). The package is released
+under the MIT license; the vendored EHBP module keeps its own MIT license (see
+`THIRD_PARTY_NOTICES.md`). Questions and security reports: contact@lebrel.ai.
