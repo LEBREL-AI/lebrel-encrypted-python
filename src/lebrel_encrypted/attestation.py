@@ -23,9 +23,13 @@ https://github.com/LEBREL-AI/router/blob/main/scripts/verify-attestation.py:
    unpinned (then ``compose_pinned`` is reported as not checked).
 6. ``mr_config_id`` recomputes from the measured app id, compose hash, instance id and KMS.
 
-What this proves: the key the client encrypts to lives in a published, reproducible build of the
-router, on genuine Intel hardware under Lebrel's app and Phala's KMS. What it does not prove: what
-the lab at the other end does with the request.
+What this proves: the key the client encrypts to was born at random inside a measured, published
+build of the router on genuine Intel hardware, and exists nowhere else (never in a key service: the
+router's KMS derives keys per app, so a key taken from it could be derived again by any compose the
+app's owner registers). The receipt-signing key is such an app key, derived inside the machine for
+Lebrel's router app: a receipt proves it was signed by that app, and the attestation names the
+measured compose that served the request. What it does not prove: what the lab at the other end
+does with the request.
 """
 
 from __future__ import annotations
