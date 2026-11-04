@@ -252,7 +252,7 @@ def _salted_request_digest(salt: bytes, body: bytes) -> str:
 class CompletionStream(Iterator[Dict[str, Any]]):
     """Closeable iterator. Fully consume it to establish authenticated completion."""
 
-    def __init__(self, response: httpx.Response, encrypted: EncryptedRequest, key_id: str, *, request_id: str = "", request_sha256: str = "", receipt_salt: Optional[bytes] = None) -> None:
+    def __init__(self, response: httpx.Response, encrypted: EncryptedRequest, key_id: str, *, request_id: str = "", request_sha256: str = "", receipt_salt: Optional[bytes] = None, routed: bool = False) -> None:
         self._response = response
         self._source = _plaintext(response, encrypted, key_id)
         self._iterator = self._events()
@@ -261,7 +261,7 @@ class CompletionStream(Iterator[Dict[str, Any]]):
         self.request_id = request_id
         self.request_sha256 = request_sha256
         self.receipt_salt = receipt_salt
-        self.router_request_id = response.headers.get("X-Request-Id", "") if receipt_salt else ""
+        self.router_request_id = response.headers.get("X-Request-Id", "") if routed else ""
         self._text: List[str] = []
 
     @property
@@ -582,7 +582,7 @@ class Lebrel:
                 # Validate required headers now, even if the caller never iterates.
                 if response.headers.get_list("X-Lebrel-Encryption-Key-Id") != [verified.key_id]:
                     raise EncryptionError("Response encryption key does not match the verified runtime")
-                return CompletionStream(response, encrypted, verified.key_id, request_id=request_id, request_sha256=request_sha256, receipt_salt=salt or None)
+                return CompletionStream(response, encrypted, verified.key_id, request_id=request_id, request_sha256=request_sha256, receipt_salt=salt or None, routed=routed)
             result = _response_object(b"".join(_plaintext(response, encrypted, verified.key_id)))
             if not 200 <= response.status_code < 300 or result.get("error") is not None:
                 raise _api_error(response.status_code, result)
