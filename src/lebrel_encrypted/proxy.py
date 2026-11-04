@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 import httpx
 
 from . import __version__, anthropic_messages, openai_responses
-from .client import APIError, Lebrel, LebrelError, MAX_REQUEST_BYTES, MODEL_ID, PRODUCTION_SIGNING_KEY_ID, RECEIPT_HEADER, _json
+from .client import APIError, Lebrel, LebrelError, MAX_REQUEST_BYTES, MODEL_ID, PRODUCTION_SIGNING_KEY_ID, RECEIPT_HEADER, _json, routed_model_id
 
 REQUEST_ID_HEADER = "X-Lebrel-Request-Id"
 RECEIPT_CHECK_HEADER = "X-Lebrel-Receipt-Check"
@@ -291,7 +291,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         model = request.get("model") if isinstance(request.get("model"), str) and request.get("model") else MODEL_ID
         try:
             if fmt == "openai":
-                if request.get("model", MODEL_ID) != MODEL_ID or not isinstance(request.get("messages"), list) or not request["messages"] or type(request.get("stream", False)) is not bool:
+                if (request.get("model", MODEL_ID) != MODEL_ID and not routed_model_id(request.get("model"))) or not isinstance(request.get("messages"), list) or not request["messages"] or type(request.get("stream", False)) is not bool:
                     raise ValueError("Invalid request")
                 chat = request
             elif fmt == "responses":

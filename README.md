@@ -196,6 +196,33 @@ The default timeout is 900 seconds for cold starts; configure `Lebrel(timeout=..
 when needed. Environment HTTP proxy settings are disabled. HTTPS certificate
 verification remains enabled.
 
+## Routed models, encrypted to the attested router
+
+The models Lebrel routes to their labs (`deepseek/deepseek-v4.1-flash`, `deepseek/deepseek-v4-pro`,
+`z-ai/glm-5.3`, `z-ai/glm-5.3-flash`, `moonshotai/kimi-k3`, `qwen/qwen3.8-max`, `qwen/qwen3.8-flash`)
+are served by Lebrel's router inside an Intel TDX confidential VM. The client asks that machine for
+a quote with a fresh nonce, verifies it in your process (see `lebrel_encrypted.attestation`), checks
+that the route's key document is signed by the receipt key the quote binds and names the encryption
+key the quote binds, and only then encrypts your request to it. Nothing between you and the router
+reads the prompt or the answer: not Lebrel's edge, not Cloudflare, not the machine's host. The router
+sends the plaintext to the lab over the lab's own API; what the lab does with it is the lab's policy.
+
+```python
+from lebrel_encrypted import Lebrel
+
+client = Lebrel()  # LEBREL_API_KEY
+answer = client.chat.completions.create(
+    model="deepseek/deepseek-v4.1-flash",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+```
+
+Intel's signature chain over the quote is checked with `dcap-qvl`: `pip install 'lebrel-encrypted[attestation]'`.
+Without it the client refuses routed models; `Lebrel(allow_unverified_chain=True)` proceeds on the
+binding checks alone, a weaker guarantee you should choose knowingly. The router's code, its
+reproducible build and the ledger of what each version measures are public at
+https://github.com/LEBREL-AI/router.
+
 ## What is verified
 
 The client retrieves `https://api.lebrel.ai/.well-known/lebrel-encryption` without

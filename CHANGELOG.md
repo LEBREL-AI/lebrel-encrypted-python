@@ -2,6 +2,20 @@
 
 All notable changes to `lebrel-encrypted`. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.5.0 — 2026-11-04
+
+- Routed models (DeepSeek, GLM, Kimi and Qwen through Lebrel) are encrypted end to end, like the
+  edition: `create(model="deepseek/deepseek-v4.1-flash", ...)` attests the router that serves the
+  route, verifies the route's signed key document with the receipt key the hardware quote binds,
+  encrypts the request to that key and names the model in `X-Lebrel-Model`; the answer, streamed or
+  not, is decrypted in your process. The local proxy accepts any routed model id.
+- `lebrel_encrypted.attestation`: the router's Intel TDX quote is verified in your process (report
+  data bound to our nonce and both keys, event log recomputed and replayed, app id and KMS pinned,
+  OS measurements compared with the pinned reference, `mr_config_id` recomputed); Intel's signature
+  chain and the TCB status through `dcap-qvl`, installed with `pip install 'lebrel-encrypted[attestation]'`.
+  Without it the client refuses routed models unless `allow_unverified_chain=True` is passed.
+- `routed_model_id()` tells a routed model id from the edition's.
+
 ## 0.4.2 — 2026-10-29
 
 - The local proxy and the command line answer with the platform's own reason when a request cannot be
