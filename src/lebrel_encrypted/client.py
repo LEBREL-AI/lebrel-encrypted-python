@@ -44,6 +44,9 @@ ROUTED_MODEL_HEADER = "X-Lebrel-Model"
 # The salt a routed request carries first inside its encrypted body: the router cuts it out and salts the
 # receipt's prompt and response digests with it, so only the two ends can check them against the content.
 ROUTED_RECEIPT_SALT_FIELD = "lebrel_receipt_salt"
+# The moment a routed request was sent (unix seconds), right after the salt inside the encrypted body: the router
+# refuses a request older or newer than five minutes, which is what lets it forget past requests after minutes.
+ROUTED_SENT_AT_FIELD = "lebrel_sent_at"
 
 
 def routed_model_id(model: Any) -> bool:
@@ -219,6 +222,9 @@ class Completion(dict):
     response_sha256: Optional[str] = None
     receipt_header: Optional[str] = None
     receipt_salt: Optional[bytes] = None
+    # For a routed model: the router's own request id (``req_…``), the one its receipt names and the one
+    # ``/v1/receipts/{id}`` on the router answers to.
+    router_request_id: str = ""
 
 
 def _answer_digest(result: Dict[str, Any], salt: bytes = b"") -> str:
@@ -229,16 +235,18 @@ def _answer_digest(result: Dict[str, Any], salt: bytes = b"") -> str:
     return hashlib.sha256(salt + (content if isinstance(content, str) else "").encode("utf-8")).hexdigest()
 
 
-def _salted_body(plaintext: bytes) -> Tuple[bytes, bytes]:
-    """The salt of a routed request and the body that carries it first: ``{"lebrel_receipt_salt":"<hex>",...}``.
-    The router cuts the field out and hashes SHA-256(salt || the rest) as the receipt's prompt digest."""
+def _salted_body(plaintext: bytes, sent_at: int) -> Tuple[bytes, bytes]:
+    """The salt of a routed request and the body that carries it first, then the moment of sending:
+    ``{"lebrel_receipt_salt":"<hex>","lebrel_sent_at":<unix seconds>,...}``. The router cuts both fields out
+    and hashes SHA-256(salt || the rest) as the receipt's prompt digest."""
     salt = secrets.token_bytes(16)
-    return salt, b'{"' + ROUTED_RECEIPT_SALT_FIELD.encode("ascii") + b'":"' + salt.hex().encode("ascii") + b'",' + plaintext[1:]
+    head = b'{"' + ROUTED_RECEIPT_SALT_FIELD.encode("ascii") + b'":"' + salt.hex().encode("ascii") + b'","' + ROUTED_SENT_AT_FIELD.encode("ascii") + b'":' + str(int(sent_at)).encode("ascii") + b","
+    return salt, head + plaintext[1:]
 
 
 def _salted_request_digest(salt: bytes, body: bytes) -> str:
-    """The receipt's prompt digest of a salted body: the salt, then the body without its first field."""
-    return hashlib.sha256(salt + b"{" + body.split(b",", 1)[1]).hexdigest()
+    """The receipt's prompt digest of a salted body: the salt, then the body without its first two fields."""
+    return hashlib.sha256(salt + b"{" + body.split(b",", 2)[2]).hexdigest()
 
 
 class CompletionStream(Iterator[Dict[str, Any]]):
@@ -253,6 +261,7 @@ class CompletionStream(Iterator[Dict[str, Any]]):
         self.request_id = request_id
         self.request_sha256 = request_sha256
         self.receipt_salt = receipt_salt
+        self.router_request_id = response.headers.get("X-Request-Id", "") if receipt_salt else ""
         self._text: List[str] = []
 
     @property
@@ -533,7 +542,7 @@ class Lebrel:
         if routed:
             # A salt of ours goes first inside the encrypted body: the router cuts it out before the lab sees the
             # request and salts the receipt's digests with it (prompt_sha256 = SHA-256(salt || this body)).
-            salt, plaintext = _salted_body(plaintext)
+            salt, plaintext = _salted_body(plaintext, int(self._clock()))
         if len(plaintext) + 20 > MAX_REQUEST_BYTES:
             raise ValueError("Completion request exceeds the encrypted request size limit")
         verified = self._routed_config(model) if routed else self._metadata()
@@ -585,6 +594,7 @@ class Lebrel:
             completion.request_sha256 = request_sha256
             completion.response_sha256 = _answer_digest(result, salt)
             completion.receipt_salt = salt or None
+            completion.router_request_id = response.headers.get("X-Request-Id", "") if routed else ""
             header = response.headers.get(RECEIPT_HEADER)
             completion.receipt_header = header if isinstance(header, str) and header else None
             return completion
