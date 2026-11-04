@@ -27,9 +27,27 @@ def test_a_real_document_verifies_without_the_chain_when_allowed():
     assert attested.encryption_key_id == doc["encryption_key_id"]
     assert attested.receipt_public_key.hex() == doc["public_key"]
     ids = [c.id for c in attested.checks]
-    for required in ("report_data", "rtmr_replay", "event_digests", "app_id", "compose_hash", "kms", "mr_td", "rtmr0", "rtmr1", "rtmr2", "mr_config_id"):
+    for required in ("report_data", "key_ids", "rtmr_replay", "event_digests", "app_id", "compose_hash", "compose_pinned", "kms", "mr_td", "rtmr0", "rtmr1", "rtmr2", "mr_config_id"):
         assert required in ids
     assert all(c.ok for c in attested.checks if c.id != "intel_chain")
+
+
+def test_the_compose_is_pinned_to_the_releases_this_client_knows():
+    doc = document()
+    assert doc["info"]["compose_hash"] in attestation.PINNED_COMPOSE_HASHES
+    with pytest.raises(attestation.AttestationError, match="not a release this client knows"):
+        attestation.verify_attestation(doc, nonce_of(doc), allow_unverified_chain=True, allowed_compose_hashes=("00" * 32,))
+    own = attestation.verify_attestation(doc, nonce_of(doc), allow_unverified_chain=True, allowed_compose_hashes=(doc["info"]["compose_hash"].upper(),))
+    assert [c for c in own.checks if c.id == "compose_pinned"][0].ok
+    unpinned = attestation.verify_attestation(doc, nonce_of(doc), allow_unverified_chain=True, allowed_compose_hashes=None)
+    pinned = [c for c in unpinned.checks if c.id == "compose_pinned"][0]
+    assert not pinned.ok and "not checked" in pinned.detail
+
+
+def test_report_data_is_length_prefixed():
+    key, other = bytes([1]) * 32, bytes([2]) * 32
+    assert attestation.report_data(key, other, b"") != attestation.report_data(key + other, b"", b"")
+    assert attestation.report_data(key, b"", other) != attestation.report_data(key, other, b"")
 
 
 def test_the_chain_is_checked_with_dcap_qvl_when_installed():
@@ -55,7 +73,7 @@ def test_without_the_chain_the_default_refuses(monkeypatch):
 
 
 @pytest.mark.parametrize("tamper", [
-    "nonce", "compose_payload", "compose_stated", "app_id_pin", "encryption_key", "v1_scheme", "rtmr", "kms",
+    "nonce", "compose_payload", "compose_stated", "app_id_pin", "encryption_key", "encryption_key_id", "v2_scheme", "rtmr", "kms",
 ])
 def test_a_tampered_document_or_the_wrong_nonce_is_refused(tamper):
     doc = document()
@@ -73,8 +91,10 @@ def test_a_tampered_document_or_the_wrong_nonce_is_refused(tamper):
         kwargs["pinned_app_id"] = "00" * 20
     elif tamper == "encryption_key":
         doc["encryption_public_key"] = "ab" * 32
-    elif tamper == "v1_scheme":
-        doc["scheme"] = 'report_data = sha512("lebrel-router-attestation-v1" || public_key || nonce)'
+    elif tamper == "encryption_key_id":
+        doc["encryption_key_id"] = "ab" * 32
+    elif tamper == "v2_scheme":
+        doc["scheme"] = 'report_data = sha512("lebrel-router-attestation-v2" || public_key || encryption_public_key || nonce)'
     elif tamper == "rtmr":
         doc["event_log"].append(copy.deepcopy(doc["event_log"][-1]))
     elif tamper == "kms":

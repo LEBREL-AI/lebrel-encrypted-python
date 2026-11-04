@@ -8,19 +8,24 @@ https://github.com/LEBREL-AI/router/blob/main/scripts/verify-attestation.py:
 1. Intel's signature chain over the quote and the platform's TCB status (``dcap-qvl``, installed
    with ``lebrel-encrypted[attestation]``); without it the chain is not checked and the client
    refuses unless told to proceed.
-2. The quote's report data commits to the receipt-signing key, the encryption key and our nonce
-   (``SHA-512("lebrel-router-attestation-v2" || public_key || encryption_public_key || nonce)``).
+2. The quote's report data commits to the receipt-signing key, the encryption key and our nonce,
+   each behind its one-byte length (``SHA-512("lebrel-router-attestation-v3" || len || public_key
+   || len || encryption_public_key || len || nonce)``), and each key id is the digest of its key.
 3. Every runtime event of the log recomputes from its payload and the log replays into the RTMRs
    the quote carries; only then are the measured app id, compose hash, instance id and key provider
    believed.
 4. The measured app id and key provider equal the pinned ones; the OS measurements equal the
    pinned reference (values observed on Lebrel's machines, see the router's RELEASES.md).
-5. ``mr_config_id`` recomputes from the measured app id, compose hash, instance id and KMS.
+5. The measured compose hash is one of the releases this client knows (``PINNED_COMPOSE_HASHES``,
+   the rows of the router's RELEASES.md at the time of this release): the app owner can register
+   other composes under the same app id, and a quote for one of those is refused. Pass your own
+   ``allowed_compose_hashes`` after checking RELEASES.md yourself, or ``None`` to leave the compose
+   unpinned (then ``compose_pinned`` is reported as not checked).
+6. ``mr_config_id`` recomputes from the measured app id, compose hash, instance id and KMS.
 
-What this proves: the key the client encrypts to lives in the published router code on genuine
-Intel hardware under Lebrel's app and Phala's KMS. What it does not prove: what the lab at the other
-end does with the request, and which compose the app owner registered (the compose hash is
-returned so you can compare it with the router's RELEASES.md).
+What this proves: the key the client encrypts to lives in a published, reproducible build of the
+router, on genuine Intel hardware under Lebrel's app and Phala's KMS. What it does not prove: what
+the lab at the other end does with the request.
 """
 
 from __future__ import annotations
@@ -29,9 +34,12 @@ import hashlib
 import json
 import struct
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-DOMAIN_V2 = b"lebrel-router-attestation-v2"
+from ._vendor.ehbp.errors import EHBPError
+from ._vendor.ehbp.identity import ServerIdentity
+
+DOMAIN_V3 = b"lebrel-router-attestation-v3"
 QUOTE_HEADER = 48
 TD_REPORT_OFFSETS = {
     "mr_td": (136, 48), "mr_config_id": (184, 48), "rtmr0": (328, 48), "rtmr1": (376, 48),
@@ -53,6 +61,22 @@ PINNED_OS = {
     "rtmr1": "89ef86c5125b986c325f0a94acfa87718a4ef3a4d4f237dbb72dda3cf777fd2c054555fb4407eb53338d7d67329a7333",
     "rtmr2": "e9000e338f33233e8f51b7fd031e1c158bdcf8572eab041c0bc8eb7fef48b23259a6a556e6c8e2af99999fc39c793179",
 }
+
+
+# The router composes this release knows: the rows of https://github.com/LEBREL-AI/router/blob/main/RELEASES.md
+# deployed when it was published (instance A behind router-tee.lebrel.ai, and the replica).
+PINNED_COMPOSE_HASHES: Tuple[str, ...] = (
+    "195352a13fe7c372a54355e898108bbf7434fb4066948d9a23204c7a7fa47ba7",  # 1.3.1, instance A (router-tee.lebrel.ai)
+    "d91af75112c9dce5272de46fb013ad15177877297302f9aa69fce550625b4eb7",  # 1.3.1, the replica
+)
+
+
+def report_data(public_key: bytes, encryption_key: bytes, nonce: bytes) -> bytes:
+    """What the quote's report data must equal (v3): the domain, then each field behind its length."""
+    digest = hashlib.sha512(DOMAIN_V3)
+    for field in (public_key, encryption_key, nonce):
+        digest.update(bytes([len(field)]) + field)
+    return digest.digest()
 
 
 class AttestationError(Exception):
@@ -162,7 +186,8 @@ def _run(awaitable: Any) -> Any:
 
 
 def verify_attestation(document: Dict[str, Any], nonce: bytes, *, allow_unverified_chain: bool = False, pinned_app_id: str = PINNED_APP_ID,
-                       pinned_kms_id: str = PINNED_KMS_ID, pinned_os: Optional[Dict[str, str]] = PINNED_OS) -> AttestedRouter:
+                       pinned_kms_id: str = PINNED_KMS_ID, pinned_os: Optional[Dict[str, str]] = PINNED_OS,
+                       allowed_compose_hashes: Optional[Iterable[str]] = PINNED_COMPOSE_HASHES) -> AttestedRouter:
     """Verifies the router's attestation document for our nonce; raises AttestationError otherwise."""
     checks: List[Check] = []
 
@@ -173,8 +198,8 @@ def verify_attestation(document: Dict[str, Any], nonce: bytes, *, allow_unverifi
 
     try:
         scheme = str(document.get("scheme", ""))
-        if "attestation-v2" not in scheme:
-            raise AttestationError("the document is not a v2 attestation (no encryption key bound)")
+        if "attestation-v3" not in scheme:
+            raise AttestationError("the document is not a v3 attestation (an older router: its fields are bound without their lengths)")
         public_key = bytes.fromhex(str(document.get("public_key", "")))
         encryption_key = bytes.fromhex(str(document.get("encryption_public_key", "")))
         encryption_key_id = str(document.get("encryption_key_id", ""))
@@ -183,9 +208,11 @@ def verify_attestation(document: Dict[str, Any], nonce: bytes, *, allow_unverifi
         if len(public_key) != 32 or len(encryption_key) != 32 or len(encryption_key_id) != 64 or len(receipt_key_id) != 64:
             raise AttestationError("the document names no usable keys")
         report = td_report(quote)
-        expected = hashlib.sha512(DOMAIN_V2 + public_key + encryption_key + nonce).digest()
-        check("report_data", report["report_data"] == expected and document.get("report_data") == expected.hex(), "binds the receipt key, the encryption key and our nonce")
-        check("key_ids", receipt_key_id == hashlib.sha256(public_key).hexdigest(), "receipt key id is the digest of the key")
+        expected = report_data(public_key, encryption_key, nonce)
+        check("report_data", report["report_data"] == expected and document.get("report_data") == expected.hex(), "binds the receipt key, the encryption key and our nonce, each behind its length")
+        bound_config = ServerIdentity.from_public_key_bytes(encryption_key).marshal_public_config()
+        check("key_ids", receipt_key_id == hashlib.sha256(public_key).hexdigest() and encryption_key_id == hashlib.sha256(bound_config).hexdigest(),
+              "each key id is the digest of the key the quote binds")
         event_log = document.get("event_log")
         if isinstance(event_log, str):
             event_log = json.loads(event_log)
@@ -202,6 +229,13 @@ def verify_attestation(document: Dict[str, Any], nonce: bytes, *, allow_unverifi
         info = document.get("info") or {}
         check("app_id", app_id is not None and app_id == pinned_app_id and info.get("app_id") == app_id, f"measured app id {app_id}")
         check("compose_hash", compose is not None and len(compose) == 64 and info.get("compose_hash") == compose, f"measured compose {compose}")
+        if allowed_compose_hashes is None:
+            checks.append(Check("compose_pinned", False, "not checked: no list of composes was given"))
+        else:
+            allowed = {str(h).lower() for h in allowed_compose_hashes}
+            check("compose_pinned", str(compose).lower() in allowed,
+                  f"measured compose {compose} is a release this client knows" if str(compose).lower() in allowed
+                  else f"measured compose {compose} is not a release this client knows: upgrade lebrel-encrypted, or check the router's RELEASES.md and pass allowed_compose_hashes")
         check("instance_id", instance_id is not None and len(instance_id) == 40, f"measured instance {instance_id}")
         provider = json.loads(bytes.fromhex(key_provider).decode()) if key_provider else {}
         check("kms", provider.get("name") == "kms" and str(provider.get("id", "")).lower() == pinned_kms_id.lower(), "key provider is the pinned KMS")
@@ -224,5 +258,5 @@ def verify_attestation(document: Dict[str, Any], nonce: bytes, *, allow_unverifi
         return AttestedRouter(public_key, receipt_key_id, encryption_key_id, encryption_key, str(app_id), str(compose), str(instance_id), chain is True, tuple(checks))
     except AttestationError:
         raise
-    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError, EHBPError):
         raise AttestationError("the attestation document is malformed") from None

@@ -65,8 +65,8 @@ def test_a_routed_request_attests_the_router_then_sends_ciphertext_with_the_mode
     seen = []
     verified = []
 
-    def verify(document, nonce, *, allow_unverified_chain):
-        verified.append((document["kind"], nonce, allow_unverified_chain))
+    def verify(document, nonce, *, allow_unverified_chain, allowed_compose_hashes):
+        verified.append((document["kind"], nonce, allow_unverified_chain, allowed_compose_hashes))
         return attested()
 
     def handler(request):
@@ -91,6 +91,7 @@ def test_a_routed_request_attests_the_router_then_sends_ciphertext_with_the_mode
         assert error.value.status_code == 503
         assert [r.url.path for r in seen] == [f"/m/{SLUG}/.well-known/attestation", f"/m/{SLUG}/.well-known/lebrel-encryption", "/v1/chat/completions"]
         assert verified[0][0] == "lebrel-router-attestation" and len(verified[0][1]) == 32 and verified[0][2] is False
+        assert verified[0][3] == attestation.PINNED_COMPOSE_HASHES, "the client pins this release's composes by default"
         assert seen[0].url.params["nonce"] == verified[0][1].hex()
         # A second request within five minutes reuses the attestation and fetches only the key document.
         with pytest.raises(APIError):
@@ -131,6 +132,10 @@ def test_a_key_document_not_signed_by_the_attested_key_or_naming_another_key_is_
     with client(mismatch, lambda *a, **k: attested(encryption_key_id="ee" * 32)) as c:
         with pytest.raises(EncryptionError, match="not the one its attestation binds"):
             c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "secret"}])
+    # The comparison is of key bytes: a document whose id matches but whose key is another is refused too.
+    with client(mismatch, lambda *a, **k: attested(encryption_public_key=bytes([6]) * 32)) as c:
+        with pytest.raises(EncryptionError, match="not the one its attestation binds"):
+            c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "secret"}])
 
 
 def test_a_failed_attestation_never_sends_anything():
@@ -142,7 +147,7 @@ def test_a_failed_attestation_never_sends_anything():
         sent.append(request)
         return streamed(200, b"{}")
 
-    def refuse(document, nonce, *, allow_unverified_chain):
+    def refuse(document, nonce, **_):
         raise attestation.AttestationError("report_data: binds nothing")
 
     with client(handler, refuse) as c:
@@ -155,3 +160,72 @@ def test_an_unknown_model_id_is_refused_before_any_request():
     with client(lambda request: httpx.Response(500), lambda *a, **k: attested()) as c:
         with pytest.raises(ValueError):
             c.chat.completions.create(model="wrong", messages=[{"role": "user", "content": "x"}])
+
+
+def test_a_routed_request_carries_a_salt_first_inside_the_encrypted_body(monkeypatch):
+    plaintexts = []
+    original = ServerIdentity.encrypt_request_body
+
+    def recording(self, body):
+        plaintexts.append(bytes(body))
+        return original(self, body)
+
+    monkeypatch.setattr(ServerIdentity, "encrypt_request_body", recording)
+
+    def handler(request):
+        if request.url.path.endswith("/attestation"):
+            return streamed(200, {"kind": "lebrel-router-attestation"})
+        if request.url.path.endswith("/lebrel-encryption"):
+            return streamed(200, route_metadata())
+        return streamed(503, {"error": {"code": "upstream_unavailable"}})
+
+    with client(handler, lambda *a, **k: attested()) as c:
+        with pytest.raises(APIError):
+            c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "hello"}])
+    assert len(plaintexts) == 1
+    prefix = b'{"lebrel_receipt_salt":"'
+    assert plaintexts[0].startswith(prefix)
+    salt_hex, rest = plaintexts[0][len(prefix):].split(b'"', 1)
+    assert len(bytes.fromhex(salt_hex.decode())) == 16 and rest.startswith(b",")
+    inner = b"{" + rest[1:]
+    assert json.loads(inner) == {"model": ROUTED, "messages": [{"role": "user", "content": "hello"}], "stream": False}
+
+
+def test_a_busy_machine_is_asked_again_after_its_retry_after_with_a_new_nonce():
+    nonces = []
+    waits = []
+
+    def handler(request):
+        if request.url.path.endswith("/attestation"):
+            nonces.append(request.url.params["nonce"])
+            if len(nonces) < 3:
+                return httpx.Response(429, headers={"Retry-After": "2"})
+            return streamed(200, {"kind": "lebrel-router-attestation"})
+        if request.url.path.endswith("/lebrel-encryption"):
+            return streamed(200, route_metadata())
+        return streamed(503, {"error": {"code": "upstream_unavailable"}})
+
+    with client(handler, lambda *a, **k: attested(), _sleep=waits.append) as c:
+        with pytest.raises(APIError):
+            c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "x"}])
+    assert len(nonces) == 3 and len(set(nonces)) == 3 and waits == [2.0, 2.0]
+
+    always_busy = lambda request: httpx.Response(429, headers={"Retry-After": "1"})  # noqa: E731
+    with client(always_busy, lambda *a, **k: attested(), _sleep=waits.append) as c:
+        with pytest.raises(EncryptionError, match="quoting for others"):
+            c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "x"}])
+
+
+def test_the_caller_can_pass_its_own_composes_or_none():
+    seen = []
+
+    def verify(document, nonce, **kwargs):
+        seen.append(kwargs["allowed_compose_hashes"])
+        return attested()
+
+    handler = lambda request: streamed(200, {"kind": "lebrel-router-attestation"}) if request.url.path.endswith("/attestation") else streamed(503, {"error": {"code": "upstream_unavailable"}})  # noqa: E731
+    for given, expected in ((("ab" * 32,), ("ab" * 32,)), (None, None)):
+        with client(handler, verify, allowed_compose_hashes=given) as c:
+            with pytest.raises((APIError, EncryptionError)):
+                c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "x"}])
+        assert seen[-1] == expected
