@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import codecs
+import dataclasses
 import hashlib
 import ipaddress
 import json
@@ -209,26 +210,41 @@ def _api_error(status: int, result: Dict[str, Any]) -> APIError:
 
 class Completion(dict):
     """The completion as a dictionary (OpenAI's schema) plus what its receipt binds: the request id, the
-    SHA-256 of the request as it was sent and of the answer as it was received. ``Lebrel.receipt`` checks
-    a receipt against them."""
+    SHA-256 of the request as it was sent and of the answer as it was received (for a routed model, both
+    salted with ``receipt_salt``, the salt this client put first inside the encrypted request). ``Lebrel.receipt``
+    checks an edition's receipt against them."""
 
     request_id: str = ""
     request_sha256: str = ""
     response_sha256: Optional[str] = None
     receipt_header: Optional[str] = None
+    receipt_salt: Optional[bytes] = None
 
 
-def _answer_digest(result: Dict[str, Any]) -> str:
-    """What the runtime hashes as the answer: the content of the first choice, empty when there is none."""
+def _answer_digest(result: Dict[str, Any], salt: bytes = b"") -> str:
+    """What the runtime hashes as the answer: the content of the first choice, empty when there is none;
+    the router of a routed model hashes the client's salt before it."""
     choices = result.get("choices")
     content = choices[0].get("message", {}).get("content") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else None
-    return hashlib.sha256((content if isinstance(content, str) else "").encode("utf-8")).hexdigest()
+    return hashlib.sha256(salt + (content if isinstance(content, str) else "").encode("utf-8")).hexdigest()
+
+
+def _salted_body(plaintext: bytes) -> Tuple[bytes, bytes]:
+    """The salt of a routed request and the body that carries it first: ``{"lebrel_receipt_salt":"<hex>",...}``.
+    The router cuts the field out and hashes SHA-256(salt || the rest) as the receipt's prompt digest."""
+    salt = secrets.token_bytes(16)
+    return salt, b'{"' + ROUTED_RECEIPT_SALT_FIELD.encode("ascii") + b'":"' + salt.hex().encode("ascii") + b'",' + plaintext[1:]
+
+
+def _salted_request_digest(salt: bytes, body: bytes) -> str:
+    """The receipt's prompt digest of a salted body: the salt, then the body without its first field."""
+    return hashlib.sha256(salt + b"{" + body.split(b",", 1)[1]).hexdigest()
 
 
 class CompletionStream(Iterator[Dict[str, Any]]):
     """Closeable iterator. Fully consume it to establish authenticated completion."""
 
-    def __init__(self, response: httpx.Response, encrypted: EncryptedRequest, key_id: str, *, request_id: str = "", request_sha256: str = "") -> None:
+    def __init__(self, response: httpx.Response, encrypted: EncryptedRequest, key_id: str, *, request_id: str = "", request_sha256: str = "", receipt_salt: Optional[bytes] = None) -> None:
         self._response = response
         self._source = _plaintext(response, encrypted, key_id)
         self._iterator = self._events()
@@ -236,6 +252,7 @@ class CompletionStream(Iterator[Dict[str, Any]]):
         self.closed = False
         self.request_id = request_id
         self.request_sha256 = request_sha256
+        self.receipt_salt = receipt_salt
         self._text: List[str] = []
 
     @property
@@ -243,7 +260,7 @@ class CompletionStream(Iterator[Dict[str, Any]]):
         """SHA-256 of the answer as the runtime hashes it (every content delta, in order); None until completed."""
         if not self.completed:
             return None
-        return hashlib.sha256("".join(self._text).encode("utf-8")).hexdigest()
+        return hashlib.sha256((self.receipt_salt or b"") + "".join(self._text).encode("utf-8")).hexdigest()
 
     def __iter__(self) -> CompletionStream:
         return self
@@ -433,14 +450,20 @@ class Lebrel:
         if cached and cached[1] > now:
             return cached[0]
         # The machine quotes one verifier at a time: a 429 means it is quoting for others, so wait what it says
-        # (a few seconds at most) and ask again with a new nonce, three times in all.
-        for attempt in range(3):
-            nonce = secrets.token_bytes(32)
+        # (a few seconds at most) and ask again with a new nonce, three times in all. Still busy after that,
+        # the document the machine keeps for everyone (no nonce of ours, at most five minutes old) is taken
+        # instead: the key it binds must still be the very key the route's key document names, and that key
+        # is born inside the machine at boot, so an old quote binding it is still a quote of this boot.
+        fresh = True
+        for attempt in range(4):
+            nonce = secrets.token_bytes(32) if attempt < 3 else b""
             try:
-                with self._http.stream("GET", f"{self._origin}/m/{slug}/.well-known/attestation", params={"nonce": nonce.hex()}, headers={"Accept": "application/json", "Accept-Encoding": "identity"}) as response:
-                    if response.status_code == 429 and attempt < 2:
+                with self._http.stream("GET", f"{self._origin}/m/{slug}/.well-known/attestation", params={"nonce": nonce.hex()} if nonce else None, headers={"Accept": "application/json", "Accept-Encoding": "identity"}) as response:
+                    if response.status_code == 429 and attempt < 3:
                         retry_after = response.headers.get("Retry-After", "")
                         self._sleep(min(float(retry_after) if retry_after.isdigit() else 3.0, 5.0))
+                        if attempt == 2:
+                            fresh = False
                         continue
                     if response.status_code != 200:
                         raise EncryptionError("The route's attestation is unavailable" if response.status_code != 429 else "The route's machine is quoting for others; try again in a few seconds")
@@ -453,12 +476,27 @@ class Lebrel:
             if not isinstance(document, dict):
                 raise _attestation.AttestationError("not a document")
             attested = self._verify_attestation(document, nonce, allow_unverified_chain=self._allow_unverified_chain, allowed_compose_hashes=self._allowed_compose_hashes)
+            if not fresh:
+                attested = dataclasses.replace(attested, checks=tuple(attested.checks) + (_attestation.Check("nonce", False, "the machine was quoting for others: its shared document was taken, with no nonce of ours"),))
         except _attestation.AttestationError as error:
             raise EncryptionError(f"The route's machine did not prove what it claims: {error}") from None
         except (ValueError, TypeError):
             raise EncryptionError("The route's attestation document is malformed") from None
         self._attested[slug] = (attested, now + 300)
         return attested
+
+    def _routed_config(self, model: str) -> VerifiedConfig:
+        """The route's key document against its attestation; when the key rotated since the attestation was
+        cached, the machine is attested again, once."""
+        slug = model.replace("/", "--")
+        cached = slug in self._attested
+        try:
+            return self._routed_metadata(model, self._attested_router(model))
+        except EncryptionError as error:
+            if not cached or "not the one its attestation binds" not in str(error):
+                raise
+            self._attested.pop(slug, None)
+            return self._routed_metadata(model, self._attested_router(model))
 
     def _routed_metadata(self, model: str, attested: _attestation.AttestedRouter) -> VerifiedConfig:
         """The route's signed key document, verified with the attested receipt key and against the attested encryption key."""
@@ -495,11 +533,10 @@ class Lebrel:
         if routed:
             # A salt of ours goes first inside the encrypted body: the router cuts it out before the lab sees the
             # request and salts the receipt's digests with it (prompt_sha256 = SHA-256(salt || this body)).
-            salt = secrets.token_bytes(16)
-            plaintext = b'{"' + ROUTED_RECEIPT_SALT_FIELD.encode("ascii") + b'":"' + salt.hex().encode("ascii") + b'",' + plaintext[1:]
+            salt, plaintext = _salted_body(plaintext)
         if len(plaintext) + 20 > MAX_REQUEST_BYTES:
             raise ValueError("Completion request exceeds the encrypted request size limit")
-        verified = self._routed_metadata(model, self._attested_router(model)) if routed else self._metadata()
+        verified = self._routed_config(model) if routed else self._metadata()
         try:
             encrypted = verified.identity.encrypt_request_body(plaintext)
         except EHBPError:
@@ -507,7 +544,7 @@ class Lebrel:
         if encrypted is None:
             raise EncryptionError("An encrypted request body is required")
         request_id = str(uuid.uuid4())
-        request_sha256 = hashlib.sha256(salt + (b"{" + plaintext.split(b",", 1)[1] if salt else plaintext)).hexdigest()
+        request_sha256 = _salted_request_digest(salt, plaintext) if salt else hashlib.sha256(plaintext).hexdigest()
         request = self._http.build_request("POST", self._origin + "/v1/chat/completions", headers={
             "Authorization": "Bearer " + self._key,
             "Content-Type": "application/octet-stream",
@@ -536,7 +573,7 @@ class Lebrel:
                 # Validate required headers now, even if the caller never iterates.
                 if response.headers.get_list("X-Lebrel-Encryption-Key-Id") != [verified.key_id]:
                     raise EncryptionError("Response encryption key does not match the verified runtime")
-                return CompletionStream(response, encrypted, verified.key_id, request_id=request_id, request_sha256=request_sha256)
+                return CompletionStream(response, encrypted, verified.key_id, request_id=request_id, request_sha256=request_sha256, receipt_salt=salt or None)
             result = _response_object(b"".join(_plaintext(response, encrypted, verified.key_id)))
             if not 200 <= response.status_code < 300 or result.get("error") is not None:
                 raise _api_error(response.status_code, result)
@@ -546,7 +583,8 @@ class Lebrel:
             completion = Completion(result)
             completion.request_id = request_id
             completion.request_sha256 = request_sha256
-            completion.response_sha256 = _answer_digest(result)
+            completion.response_sha256 = _answer_digest(result, salt)
+            completion.receipt_salt = salt or None
             header = response.headers.get(RECEIPT_HEADER)
             completion.receipt_header = header if isinstance(header, str) and header else None
             return completion
@@ -583,6 +621,11 @@ class Lebrel:
         request_id = subject if isinstance(subject, str) else getattr(subject, "request_id", "")
         if not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id):
             raise ValueError("A receipt is looked up by its request id")
+        if (not isinstance(subject, str) and getattr(subject, "receipt_salt", None)) or request_id.startswith("req_"):
+            # A routed model's receipt is signed by the router's key (named by its attestation) and references
+            # a route manifest, not an edition's: this release does not verify it. The digests are on the
+            # completion (request_sha256, response_sha256, receipt_salt) for whoever checks it by hand.
+            raise ValueError("Receipts of routed models are signed by the attested router; this release verifies editions' receipts only")
         document: Optional[proof.Signed] = None
         header = None if isinstance(subject, str) else getattr(subject, "receipt_header", None)
         if isinstance(header, str) and header:

@@ -10,7 +10,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from lebrel_encrypted import attestation
-from lebrel_encrypted.client import APIError, EncryptionError, Lebrel, ROUTED_MODEL_HEADER, routed_model_id
+from lebrel_encrypted.client import APIError, EncryptionError, Lebrel, ROUTED_MODEL_HEADER, _salted_body, _salted_request_digest, routed_model_id
 from lebrel_encrypted._vendor.ehbp.identity import ServerIdentity
 
 
@@ -210,6 +210,31 @@ def test_a_busy_machine_is_asked_again_after_its_retry_after_with_a_new_nonce():
             c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "x"}])
     assert len(nonces) == 3 and len(set(nonces)) == 3 and waits == [2.0, 2.0]
 
+    # Busy three times, the shared document (no nonce) is taken, and the attestation says it was not fresh.
+    taken = []
+    verified = []
+
+    def busy_then_shared(request):
+        if request.url.path.endswith("/attestation"):
+            taken.append(request.url.params.get("nonce"))
+            if "nonce" in request.url.params:
+                return httpx.Response(429, headers={"Retry-After": "1"})
+            return streamed(200, {"kind": "lebrel-router-attestation"})
+        if request.url.path.endswith("/lebrel-encryption"):
+            return streamed(200, route_metadata())
+        return streamed(503, {"error": {"code": "upstream_unavailable"}})
+
+    def verify(document, nonce, **_):
+        verified.append(nonce)
+        return attested()
+
+    with client(busy_then_shared, verify, _sleep=waits.append) as c:
+        with pytest.raises(APIError):
+            c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "x"}])
+        assert taken[-1] is None and len(taken) == 4 and verified == [b""]
+        not_fresh = [check for check in c._attested[SLUG][0].checks if check.id == "nonce"]
+        assert not_fresh and not not_fresh[0].ok
+
     always_busy = lambda request: httpx.Response(429, headers={"Retry-After": "1"})  # noqa: E731
     with client(always_busy, lambda *a, **k: attested(), _sleep=waits.append) as c:
         with pytest.raises(EncryptionError, match="quoting for others"):
@@ -229,3 +254,45 @@ def test_the_caller_can_pass_its_own_composes_or_none():
             with pytest.raises((APIError, EncryptionError)):
                 c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "x"}])
         assert seen[-1] == expected
+
+
+def test_the_salted_request_digest_is_the_routers():
+    inner = b'{"model":"deepseek/deepseek-v4.1-flash","messages":[{"role":"user","content":"a,b"}],"stream":false}'
+    salt, body = _salted_body(inner)
+    assert len(salt) == 16 and body == b'{"lebrel_receipt_salt":"' + salt.hex().encode() + b'",' + inner[1:]
+    assert _salted_request_digest(salt, body) == hashlib.sha256(salt + inner).hexdigest()
+
+
+def test_a_rotated_key_makes_the_client_attest_again_once():
+    attestations = []
+    envelopes = [route_metadata(), route_metadata()]
+    other = ServerIdentity.from_public_key_bytes(bytes([6]) * 32)
+    other_config = other.marshal_public_config()
+    rotated = route_metadata(hpkeConfig=base64.b64encode(other_config).decode(), keyId=hashlib.sha256(other_config).hexdigest())
+
+    def handler(request):
+        if request.url.path.endswith("/attestation"):
+            attestations.append(request.url.params["nonce"])
+            return streamed(200, {"kind": "lebrel-router-attestation"})
+        if request.url.path.endswith("/lebrel-encryption"):
+            return streamed(200, envelopes.pop(0) if envelopes else rotated)
+        return streamed(503, {"error": {"code": "upstream_unavailable"}})
+
+    # The first attestation serves two requests (cached); the re-attestation after the rotation binds the new key.
+    bound = [attested(), attested(encryption_key_id=hashlib.sha256(other_config).hexdigest(), encryption_public_key=bytes([6]) * 32)]
+    with client(handler, lambda *a, **k: bound.pop(0)) as c:
+        for _ in range(2):
+            with pytest.raises(APIError):
+                c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "x"}])
+        assert len(attestations) == 1, "within five minutes the attestation is reused"
+        # The key document now names a rotated key: the cached attestation is dropped and the machine attested again.
+        with pytest.raises(APIError):
+            c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "x"}])
+        assert len(attestations) == 2
+        assert bound == []
+
+
+def test_a_routed_receipt_is_refused_explicitly_by_this_release():
+    with client(lambda request: httpx.Response(500), lambda *a, **k: attested()) as c:
+        with pytest.raises(ValueError, match="attested router"):
+            c.receipt("req_0123456789abcdef0123456789abcdef")
