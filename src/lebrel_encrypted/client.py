@@ -13,17 +13,19 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import socket
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterator, List, Optional, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urlsplit
 
 import httpx
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+from . import attestation as _attestation
 from . import proof
 from ._vendor.ehbp.errors import EHBPError
 from ._vendor.ehbp.identity import EncryptedRequest, ServerIdentity
@@ -35,6 +37,14 @@ MAX_REQUEST_BYTES = 8 * 1024 * 1024
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 MAX_EVENT_BYTES = 4 * 1024 * 1024
 MAX_METADATA_BYTES = 64 * 1024
+# A routed model is reached as /m/{slug}/..., the slug being the model id with "/" as "--".
+_ROUTED_MODEL = re.compile(r"^[a-z0-9][a-z0-9.-]*/[a-z0-9][a-z0-9.-]*$")
+ROUTED_MODEL_HEADER = "X-Lebrel-Model"
+
+
+def routed_model_id(model: Any) -> bool:
+    """True for a routed model id (lab/model), which the attested router serves encrypted."""
+    return isinstance(model, str) and model != MODEL_ID and _ROUTED_MODEL.fullmatch(model) is not None
 RECEIPT_HEADER = "Proof-Of-Edition-Receipt"
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -95,7 +105,7 @@ class VerifiedConfig:
     expires_at: int
 
 
-def verify_metadata(envelope: bytes, signing_public_key: bytes, now: float) -> VerifiedConfig:
+def verify_metadata(envelope: bytes, signing_public_key: bytes, now: float, model_id: str = MODEL_ID) -> VerifiedConfig:
     """Verify signed bytes before trusting or parsing the runtime configuration."""
     try:
         if len(envelope) > MAX_METADATA_BYTES or len(signing_public_key) != 32:
@@ -112,7 +122,7 @@ def verify_metadata(envelope: bytes, signing_public_key: bytes, now: float) -> V
         required = {"expiresAt", "hpkeConfig", "issuedAt", "keyId", "modelId", "serverInstanceId", "signingKeyId", "version"}
         if not isinstance(fields, dict) or set(fields) != required:
             raise ValueError("Invalid configuration fields")
-        if type(fields["version"]) is not int or fields["version"] != 1 or fields["modelId"] != MODEL_ID:
+        if type(fields["version"]) is not int or fields["version"] != 1 or fields["modelId"] != model_id:
             raise ValueError("Wrong model or version")
         issued, expires = fields["issuedAt"], fields["expiresAt"]
         if type(issued) is not int or type(expires) is not int or not 0 < expires - issued <= 600:
@@ -368,7 +378,7 @@ class Lebrel:
     testing or managed key rotation. Do not fetch it from the same metadata URL.
     """
 
-    def __init__(self, api_key: Optional[str] = None, *, base_url: str = "https://api.lebrel.ai", timeout: float = 900.0, signing_public_key: str = PRODUCTION_SIGNING_KEY, _transport: Optional[httpx.BaseTransport] = None, _clock: Callable[[], float] = time.time) -> None:
+    def __init__(self, api_key: Optional[str] = None, *, base_url: str = "https://api.lebrel.ai", timeout: float = 900.0, signing_public_key: str = PRODUCTION_SIGNING_KEY, allow_unverified_chain: bool = False, _transport: Optional[httpx.BaseTransport] = None, _clock: Callable[[], float] = time.time, _verify_attestation: Optional[Callable[..., Any]] = None) -> None:
         key = api_key if api_key is not None else os.getenv("LEBREL_API_KEY", "")
         if not isinstance(key, str) or not key.strip() or any(char in key for char in "\r\n"):
             raise ValueError("A Lebrel API key is required (argument or LEBREL_API_KEY)")
@@ -390,6 +400,12 @@ class Lebrel:
             raise ValueError("signing_public_key must be base64 of a raw 32-byte Ed25519 public key") from None
         self._key, self._origin, self._signer, self._clock = key, base_url.rstrip("/"), public_key, _clock
         self._http = httpx.Client(timeout=httpx.Timeout(timeout, connect=15), follow_redirects=False, trust_env=False, transport=_transport)
+        # Routed models: the router's attestation is verified before its key is trusted, and kept for a
+        # few minutes per route. ``allow_unverified_chain`` lets a machine without dcap-qvl proceed on the
+        # binding checks alone, which is a weaker guarantee and is never the default.
+        self._allow_unverified_chain = bool(allow_unverified_chain)
+        self._verify_attestation = _verify_attestation or _attestation.verify_attestation
+        self._attested: Dict[str, Tuple[_attestation.AttestedRouter, float]] = {}
         self.chat = _Chat(self)
 
     def _metadata(self) -> VerifiedConfig:
@@ -402,9 +418,52 @@ class Lebrel:
         except httpx.HTTPError:
             raise TransportError("Could not retrieve the runtime encryption configuration") from None
 
+    def _attested_router(self, model: str) -> _attestation.AttestedRouter:
+        """The route's router, attested for a fresh nonce of ours; reused for five minutes."""
+        slug = model.replace("/", "--")
+        cached = self._attested.get(slug)
+        now = self._clock()
+        if cached and cached[1] > now:
+            return cached[0]
+        nonce = secrets.token_bytes(32)
+        try:
+            with self._http.stream("GET", f"{self._origin}/m/{slug}/.well-known/attestation", params={"nonce": nonce.hex()}, headers={"Accept": "application/json", "Accept-Encoding": "identity"}) as response:
+                if response.status_code != 200:
+                    raise EncryptionError("The route's attestation is unavailable" if response.status_code != 429 else "The route's machine is quoting for others; try again in a few seconds")
+                raw = _bounded_raw(response, _attestation.MAX_DOCUMENT_BYTES)
+        except httpx.HTTPError:
+            raise TransportError("Could not retrieve the route's attestation") from None
+        try:
+            document = _json(raw)
+            if not isinstance(document, dict):
+                raise _attestation.AttestationError("not a document")
+            attested = self._verify_attestation(document, nonce, allow_unverified_chain=self._allow_unverified_chain)
+        except _attestation.AttestationError as error:
+            raise EncryptionError(f"The route's machine did not prove what it claims: {error}") from None
+        except (ValueError, TypeError):
+            raise EncryptionError("The route's attestation document is malformed") from None
+        self._attested[slug] = (attested, now + 300)
+        return attested
+
+    def _routed_metadata(self, model: str, attested: _attestation.AttestedRouter) -> VerifiedConfig:
+        """The route's signed key document, verified with the attested receipt key and against the attested encryption key."""
+        slug = model.replace("/", "--")
+        try:
+            with self._http.stream("GET", f"{self._origin}/m/{slug}/.well-known/lebrel-encryption", headers={"Accept": "application/json", "Accept-Encoding": "identity"}) as response:
+                if response.status_code != 200:
+                    raise EncryptionError("The route's encryption key is unavailable")
+                raw = _bounded_raw(response, MAX_METADATA_BYTES)
+        except httpx.HTTPError:
+            raise TransportError("Could not retrieve the route's encryption configuration") from None
+        verified = verify_metadata(raw, attested.receipt_public_key, self._clock(), model_id=model)
+        if verified.key_id != attested.encryption_key_id:
+            raise EncryptionError("The route's encryption key is not the one its attestation binds")
+        return verified
+
     def create(self, *, messages: List[Dict[str, Any]], model: str = MODEL_ID, stream: bool = False, **parameters: Any) -> Any:
-        if model != MODEL_ID:
-            raise ValueError("This encrypted endpoint serves only DeepSeek V4.1 Flash Uncensored")
+        routed = model != MODEL_ID
+        if routed and not (isinstance(model, str) and _ROUTED_MODEL.fullmatch(model)):
+            raise ValueError("model must be the Lebrel edition or a routed model id such as deepseek/deepseek-v4.1-flash")
         if not isinstance(messages, list) or not messages or type(stream) is not bool:
             raise ValueError("messages must be a nonempty list and stream must be boolean")
         # `service_tier` (the OpenAI parameter): "priority" asks for Lebrel's priority tier, ahead of the line at its
@@ -418,7 +477,7 @@ class Lebrel:
             raise ValueError("Completion parameters must be valid finite JSON") from None
         if len(plaintext) + 20 > MAX_REQUEST_BYTES:
             raise ValueError("Completion request exceeds the encrypted request size limit")
-        verified = self._metadata()
+        verified = self._routed_metadata(model, self._attested_router(model)) if routed else self._metadata()
         try:
             encrypted = verified.identity.encrypt_request_body(plaintext)
         except EHBPError:
@@ -436,6 +495,7 @@ class Lebrel:
             "X-Lebrel-Encryption-Key-Id": verified.key_id,
             "X-Lebrel-Request-Id": request_id,
             **({"X-Lebrel-Service-Tier": "priority"} if service_tier == "priority" else {}),
+            **({ROUTED_MODEL_HEADER: model} if routed else {}),
         }, content=encrypted.body)
         try:
             response = self._http.send(request, stream=True)

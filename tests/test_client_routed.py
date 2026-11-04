@@ -1,0 +1,157 @@
+"""Routed models: the client attests the router, verifies the route's key document with the attested
+receipt key, and sends the ciphertext with the model named in a header."""
+
+import base64
+import hashlib
+import json
+
+import httpx
+import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from lebrel_encrypted import attestation
+from lebrel_encrypted.client import APIError, EncryptionError, Lebrel, ROUTED_MODEL_HEADER, routed_model_id
+from lebrel_encrypted._vendor.ehbp.identity import ServerIdentity
+
+
+class BytesStream(httpx.SyncByteStream):
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def __iter__(self):
+        yield self._data
+
+
+def streamed(status, content):
+    return httpx.Response(status, stream=BytesStream(content if isinstance(content, bytes) else json.dumps(content).encode()))
+
+ROUTED = "deepseek/deepseek-v4.1-flash"
+SLUG = "deepseek--deepseek-v4.1-flash"
+RECEIPT_KEY = Ed25519PrivateKey.from_private_bytes(bytes([3]) * 32)
+RECEIPT_PUBLIC = RECEIPT_KEY.public_key().public_bytes_raw()
+ROUTER = ServerIdentity.from_public_key_bytes(bytes([5]) * 32)
+HPKE_CONFIG = ROUTER.marshal_public_config()
+KEY_ID = hashlib.sha256(HPKE_CONFIG).hexdigest()
+
+
+def attested(**changes):
+    fields = dict(receipt_public_key=RECEIPT_PUBLIC, receipt_key_id=hashlib.sha256(RECEIPT_PUBLIC).hexdigest(), encryption_key_id=KEY_ID,
+                  encryption_public_key=bytes([5]) * 32, app_id=attestation.PINNED_APP_ID, compose_hash="ab" * 32, instance_id="cd" * 20,
+                  chain_checked=True, checks=())
+    fields.update(changes)
+    return attestation.AttestedRouter(**fields)
+
+
+def route_metadata(model=ROUTED, key=RECEIPT_KEY, **changes):
+    payload = {"expiresAt": 1300, "hpkeConfig": base64.b64encode(HPKE_CONFIG).decode(), "issuedAt": 1000, "keyId": KEY_ID, "modelId": model,
+               "serverInstanceId": "0" * 32, "signingKeyId": hashlib.sha256(key.public_key().public_bytes_raw()).hexdigest(), "version": 1}
+    payload.update(changes)
+    encoded = json.dumps(payload, separators=(",", ":")).encode()
+    return json.dumps({"version": 1, "payload": base64.b64encode(encoded).decode(), "signature": base64.b64encode(key.sign(encoded)).decode()}).encode()
+
+
+def client(handler, verify, **kwargs):
+    return Lebrel("leb_live_test", _transport=httpx.MockTransport(handler), _clock=lambda: 1010, _verify_attestation=verify, **kwargs)
+
+
+def test_routed_model_ids():
+    assert routed_model_id(ROUTED)
+    assert not routed_model_id("lebrel/deepseek-v4.1-flash-uncensored")
+    assert not routed_model_id("wrong")
+    assert not routed_model_id("a/b/c")
+
+
+def test_a_routed_request_attests_the_router_then_sends_ciphertext_with_the_model_header():
+    seen = []
+    verified = []
+
+    def verify(document, nonce, *, allow_unverified_chain):
+        verified.append((document["kind"], nonce, allow_unverified_chain))
+        return attested()
+
+    def handler(request):
+        seen.append(request)
+        path = request.url.path
+        if path == f"/m/{SLUG}/.well-known/attestation":
+            return streamed(200, {"kind": "lebrel-router-attestation", "nonce": request.url.params["nonce"]})
+        if path == f"/m/{SLUG}/.well-known/lebrel-encryption":
+            return streamed(200, route_metadata())
+        if path == "/v1/chat/completions":
+            assert request.headers[ROUTED_MODEL_HEADER] == ROUTED
+            assert request.headers["X-Lebrel-Encryption-Key-Id"] == KEY_ID
+            assert len(request.headers["Ehbp-Encapsulated-Key"]) == 64
+            assert request.headers["Content-Type"] == "application/octet-stream"
+            assert b"hello" not in request.content, "the prompt never travels in clear"
+            return streamed(503, {"error": {"code": "upstream_unavailable"}})
+        raise AssertionError(path)
+
+    with client(handler, verify) as c:
+        with pytest.raises(APIError) as error:
+            c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "hello"}])
+        assert error.value.status_code == 503
+        assert [r.url.path for r in seen] == [f"/m/{SLUG}/.well-known/attestation", f"/m/{SLUG}/.well-known/lebrel-encryption", "/v1/chat/completions"]
+        assert verified[0][0] == "lebrel-router-attestation" and len(verified[0][1]) == 32 and verified[0][2] is False
+        assert seen[0].url.params["nonce"] == verified[0][1].hex()
+        # A second request within five minutes reuses the attestation and fetches only the key document.
+        with pytest.raises(APIError):
+            c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "again"}])
+        assert len(verified) == 1
+        assert [r.url.path for r in seen][3:] == [f"/m/{SLUG}/.well-known/lebrel-encryption", "/v1/chat/completions"]
+
+
+def test_a_key_document_not_signed_by_the_attested_key_or_naming_another_key_is_refused():
+    other = Ed25519PrivateKey.from_private_bytes(bytes([7]) * 32)
+    cases = {
+        "wrong signer": route_metadata(key=other),
+        "wrong model": route_metadata(model="other/model"),
+    }
+    for name, envelope in cases.items():
+        sent = []
+
+        def handler(request, envelope=envelope):
+            if request.url.path.endswith("/attestation"):
+                return streamed(200, {"kind": "lebrel-router-attestation"})
+            if request.url.path.endswith("/lebrel-encryption"):
+                return streamed(200, envelope)
+            sent.append(request)
+            return streamed(200, b"{}")
+
+        with client(handler, lambda *a, **k: attested()) as c:
+            with pytest.raises(EncryptionError):
+                c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "secret"}])
+        assert sent == [], name
+
+    def mismatch(request):
+        if request.url.path.endswith("/attestation"):
+            return streamed(200, {"kind": "lebrel-router-attestation"})
+        if request.url.path.endswith("/lebrel-encryption"):
+            return streamed(200, route_metadata())
+        raise AssertionError("sent")
+
+    with client(mismatch, lambda *a, **k: attested(encryption_key_id="ee" * 32)) as c:
+        with pytest.raises(EncryptionError, match="not the one its attestation binds"):
+            c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "secret"}])
+
+
+def test_a_failed_attestation_never_sends_anything():
+    sent = []
+
+    def handler(request):
+        if request.url.path.endswith("/attestation"):
+            return streamed(200, {"kind": "lebrel-router-attestation"})
+        sent.append(request)
+        return streamed(200, b"{}")
+
+    def refuse(document, nonce, *, allow_unverified_chain):
+        raise attestation.AttestationError("report_data: binds nothing")
+
+    with client(handler, refuse) as c:
+        with pytest.raises(EncryptionError, match="did not prove"):
+            c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "secret"}])
+    assert sent == []
+
+
+def test_an_unknown_model_id_is_refused_before_any_request():
+    with client(lambda request: httpx.Response(500), lambda *a, **k: attested()) as c:
+        with pytest.raises(ValueError):
+            c.chat.completions.create(model="wrong", messages=[{"role": "user", "content": "x"}])
