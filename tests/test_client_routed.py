@@ -186,8 +186,8 @@ def test_a_routed_request_carries_a_salt_first_inside_the_encrypted_body(monkeyp
     prefix = b'{"lebrel_receipt_salt":"'
     assert plaintexts[0].startswith(prefix)
     salt_hex, rest = plaintexts[0][len(prefix):].split(b'"', 1)
-    assert len(bytes.fromhex(salt_hex.decode())) == 16 and rest.startswith(b",")
-    inner = b"{" + rest[1:]
+    assert len(bytes.fromhex(salt_hex.decode())) == 16 and rest.startswith(b',"lebrel_sent_at":1010,'), rest[:40]
+    inner = b"{" + rest.split(b",", 2)[2]
     assert json.loads(inner) == {"model": ROUTED, "messages": [{"role": "user", "content": "hello"}], "stream": False}
 
 
@@ -258,8 +258,8 @@ def test_the_caller_can_pass_its_own_composes_or_none():
 
 def test_the_salted_request_digest_is_the_routers():
     inner = b'{"model":"deepseek/deepseek-v4.1-flash","messages":[{"role":"user","content":"a,b"}],"stream":false}'
-    salt, body = _salted_body(inner)
-    assert len(salt) == 16 and body == b'{"lebrel_receipt_salt":"' + salt.hex().encode() + b'",' + inner[1:]
+    salt, body = _salted_body(inner, 1793831729)
+    assert len(salt) == 16 and body == b'{"lebrel_receipt_salt":"' + salt.hex().encode() + b'","lebrel_sent_at":1793831729,' + inner[1:]
     assert _salted_request_digest(salt, body) == hashlib.sha256(salt + inner).hexdigest()
 
 
