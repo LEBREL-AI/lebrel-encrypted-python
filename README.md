@@ -72,10 +72,10 @@ The console entry point `lebrel-encrypted proxy --port 11437` is equivalent.
 
 ## Reasoning
 
-DeepSeek V4.1 Flash thinks only when asked. Through the proxy the edition gets `reasoning_effort: "max"`
-unless your request names `reasoning_effort` (`none`, `low`, `medium`, `high`, `max`), `thinking` or
-`chat_template_kwargs`, which are forwarded as they are. With the client, pass `reasoning_effort="max"`
-to `create()`.
+DeepSeek V4.1 Flash thinks only when asked. Through the proxy the edition gets `thinking: true` unless
+your request names `thinking` (`true`/`false`), `profile` (`chat` or `thinking_50`), `chat_template_kwargs`,
+`reasoning_effort` or `custom_params`, which are forwarded as they are. With the client, pass
+`thinking=True` to `create()`.
 
 ## Terminal requests
 

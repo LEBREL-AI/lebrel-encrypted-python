@@ -199,16 +199,16 @@ def test_the_edition_gets_maximum_reasoning_unless_the_request_says_otherwise(pr
     _, url = proxy
     with httpx.Client(trust_env=False, headers={"Authorization": "Bearer local-key"}) as client:
         assert client.post(url + "/v1/chat/completions", json=body("private-question")).status_code == 200
-        assert MockClient.instances[-1].request["reasoning_effort"] == "max"
+        assert MockClient.instances[-1].request["thinking"] is True
         explicit = body("private-question")
-        explicit["reasoning_effort"] = "none"
+        explicit["thinking"] = False
         assert client.post(url + "/v1/chat/completions", json=explicit).status_code == 200
-        assert MockClient.instances[-1].request["reasoning_effort"] == "none"
-        thinking = body("private-question")
-        thinking["thinking"] = True
-        assert client.post(url + "/v1/chat/completions", json=thinking).status_code == 200
-        assert "reasoning_effort" not in MockClient.instances[-1].request and MockClient.instances[-1].request["thinking"] is True
+        assert MockClient.instances[-1].request["thinking"] is False
+        profile = body("private-question")
+        profile["profile"] = "chat"
+        assert client.post(url + "/v1/chat/completions", json=profile).status_code == 200
+        assert "thinking" not in MockClient.instances[-1].request and MockClient.instances[-1].request["profile"] == "chat"
         routed = body("private-question")
         routed["model"] = "deepseek/deepseek-v4.1-flash"
         assert client.post(url + "/v1/chat/completions", json=routed).status_code == 200
-        assert "reasoning_effort" not in MockClient.instances[-1].request, "a routed model keeps the lab's own default"
+        assert "thinking" not in MockClient.instances[-1].request, "a routed model keeps the lab's own default"
