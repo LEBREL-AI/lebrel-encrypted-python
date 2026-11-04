@@ -69,8 +69,10 @@ def _key_file(path: Path) -> str:
     return key
 
 
-# What the proxy asks of the edition when a request says nothing about reasoning.
-DEFAULT_REASONING_EFFORT = "max"
+# What the proxy asks of the edition when a request says nothing about reasoning: the edition's public
+# thinking switch, on (its gateway accepts `thinking`, `profile` and `chat_template_kwargs.thinking`,
+# not an effort value).
+DEFAULT_THINKING = True
 
 
 class ProxyServer(ThreadingHTTPServer):
@@ -305,10 +307,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except ValueError:
             self._error(400, "invalid_request", fmt)
             return
-        # The edition thinks only when asked, and most tools never ask: unless the request names an
-        # effort or a thinking switch, the proxy asks for the edition's maximum reasoning.
-        if model == MODEL_ID and not any(k in chat for k in ("reasoning_effort", "thinking", "chat_template_kwargs")):
-            chat["reasoning_effort"] = DEFAULT_REASONING_EFFORT
+        # The edition thinks only when asked, and most tools never ask: unless the request names a
+        # thinking switch (or an effort the lab understands), the proxy turns the edition's thinking on.
+        if model == MODEL_ID and not any(k in chat for k in ("thinking", "profile", "chat_template_kwargs", "reasoning_effort", "custom_params")):
+            chat["thinking"] = DEFAULT_THINKING
         self._complete(key, chat, fmt, model, request)
 
     def _complete(self, key: str, chat: Dict[str, Any], fmt: str, model: str, original: Dict[str, Any]) -> None:

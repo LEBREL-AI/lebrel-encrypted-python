@@ -15,9 +15,9 @@ All notable changes to `lebrel-encrypted`. Versions follow [Semantic Versioning]
   chain and the TCB status through `dcap-qvl`, installed with `pip install 'lebrel-encrypted[attestation]'`.
   Without it the client refuses routed models unless `allow_unverified_chain=True` is passed.
 - `routed_model_id()` tells a routed model id from the edition's.
-- The proxy asks the edition for its maximum reasoning (`reasoning_effort: "max"`) when a request says
-  nothing about reasoning: coding tools never do, and the edition thinks only when asked. A request
-  that names `reasoning_effort`, `thinking` or `chat_template_kwargs` is forwarded as it is.
+- The proxy turns the edition's thinking on (`thinking: true`) when a request says nothing about
+  reasoning: coding tools never do, and the edition thinks only when asked. A request that names
+  `thinking`, `profile`, `chat_template_kwargs`, `reasoning_effort` or `custom_params` is forwarded as it is.
 
 ## 0.4.2 — 2026-10-29
 
