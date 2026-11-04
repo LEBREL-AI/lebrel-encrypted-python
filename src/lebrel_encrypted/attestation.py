@@ -70,8 +70,8 @@ PINNED_OS = {
 # The router composes this release knows: the rows of https://github.com/LEBREL-AI/router/blob/main/RELEASES.md
 # deployed when it was published (instance A behind router-tee.lebrel.ai, and the replica).
 PINNED_COMPOSE_HASHES: Tuple[str, ...] = (
-    "a889ba12c4c405d66ee12a3ceb3ee646fc084fc2d02f53ce15ae01dcf138218e",  # 1.3.3, instance A (router-tee.lebrel.ai)
-    "4601bebe4c37238a6e9a2bf957aef66f935917175afd896c8f397f341a20660b",  # 1.3.3, the replica
+    "031f72e1ebce5f36acf91c8c1f552b50d6e9825d45395d048832370c2348a556",  # 1.3.4, instance A (router-tee.lebrel.ai)
+    "35b9818cf8b7fe2de2c93a1ab2ba000b571eaa8d4060e7f48d437d7c45dfba85",  # 1.3.4, the replica
 )
 
 
