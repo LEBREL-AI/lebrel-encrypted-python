@@ -193,3 +193,22 @@ def test_proxy_relays_request_ids_and_receipts(proxy):
     assert missing.status_code == 404 and missing.json()["error"]["code"] == "receipt_not_found"
     assert httpx.get(base + "/v1/receipts/bad", headers={"Authorization": "Bearer leb_live_test"}).status_code == 404
     assert httpx.get(base + "/v1/receipts/req-plain-0000001").status_code == 401, "receipts through the proxy need the caller's key like everything else"
+
+
+def test_the_edition_gets_maximum_reasoning_unless_the_request_says_otherwise(proxy):
+    _, url = proxy
+    with httpx.Client(trust_env=False, headers={"Authorization": "Bearer local-key"}) as client:
+        assert client.post(url + "/v1/chat/completions", json=body("private-question")).status_code == 200
+        assert MockClient.instances[-1].request["reasoning_effort"] == "max"
+        explicit = body("private-question")
+        explicit["reasoning_effort"] = "none"
+        assert client.post(url + "/v1/chat/completions", json=explicit).status_code == 200
+        assert MockClient.instances[-1].request["reasoning_effort"] == "none"
+        thinking = body("private-question")
+        thinking["thinking"] = True
+        assert client.post(url + "/v1/chat/completions", json=thinking).status_code == 200
+        assert "reasoning_effort" not in MockClient.instances[-1].request and MockClient.instances[-1].request["thinking"] is True
+        routed = body("private-question")
+        routed["model"] = "deepseek/deepseek-v4.1-flash"
+        assert client.post(url + "/v1/chat/completions", json=routed).status_code == 200
+        assert "reasoning_effort" not in MockClient.instances[-1].request, "a routed model keeps the lab's own default"
