@@ -296,3 +296,18 @@ def test_a_routed_receipt_is_refused_explicitly_by_this_release():
     with client(lambda request: httpx.Response(500), lambda *a, **k: attested()) as c:
         with pytest.raises(ValueError, match="attested router"):
             c.receipt("req_0123456789abcdef0123456789abcdef")
+
+
+def test_a_routed_stream_carries_the_routers_request_id_and_an_edition_stream_does_not():
+    def handler(request):
+        if request.url.path.endswith("/attestation"):
+            return streamed(200, {"kind": "lebrel-router-attestation"})
+        if request.url.path.endswith("/lebrel-encryption"):
+            return streamed(200, route_metadata())
+        key_id = request.headers["X-Lebrel-Encryption-Key-Id"]
+        return httpx.Response(200, headers={"Content-Type": "text/event-stream", "Ehbp-Response-Nonce": "ab" * 32, "X-Lebrel-Encryption-Key-Id": key_id, "X-Request-Id": "req_0123456789abcdef0123456789abcdef"}, stream=BytesStream(b""))
+
+    with client(handler, lambda *a, **k: attested()) as c:
+        stream = c.chat.completions.create(model=ROUTED, messages=[{"role": "user", "content": "x"}], stream=True)
+        assert stream.router_request_id == "req_0123456789abcdef0123456789abcdef" and stream.receipt_salt and len(stream.receipt_salt) == 16
+        stream.close()
