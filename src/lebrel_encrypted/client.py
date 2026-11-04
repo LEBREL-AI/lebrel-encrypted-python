@@ -18,7 +18,7 @@ import socket
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urlsplit
 
 import httpx
@@ -40,6 +40,9 @@ MAX_METADATA_BYTES = 64 * 1024
 # A routed model is reached as /m/{slug}/..., the slug being the model id with "/" as "--".
 _ROUTED_MODEL = re.compile(r"^[a-z0-9][a-z0-9.-]*/[a-z0-9][a-z0-9.-]*$")
 ROUTED_MODEL_HEADER = "X-Lebrel-Model"
+# The salt a routed request carries first inside its encrypted body: the router cuts it out and salts the
+# receipt's prompt and response digests with it, so only the two ends can check them against the content.
+ROUTED_RECEIPT_SALT_FIELD = "lebrel_receipt_salt"
 
 
 def routed_model_id(model: Any) -> bool:
@@ -378,7 +381,7 @@ class Lebrel:
     testing or managed key rotation. Do not fetch it from the same metadata URL.
     """
 
-    def __init__(self, api_key: Optional[str] = None, *, base_url: str = "https://api.lebrel.ai", timeout: float = 900.0, signing_public_key: str = PRODUCTION_SIGNING_KEY, allow_unverified_chain: bool = False, _transport: Optional[httpx.BaseTransport] = None, _clock: Callable[[], float] = time.time, _verify_attestation: Optional[Callable[..., Any]] = None) -> None:
+    def __init__(self, api_key: Optional[str] = None, *, base_url: str = "https://api.lebrel.ai", timeout: float = 900.0, signing_public_key: str = PRODUCTION_SIGNING_KEY, allow_unverified_chain: bool = False, allowed_compose_hashes: Optional[Iterable[str]] = _attestation.PINNED_COMPOSE_HASHES, _transport: Optional[httpx.BaseTransport] = None, _clock: Callable[[], float] = time.time, _verify_attestation: Optional[Callable[..., Any]] = None, _sleep: Callable[[float], None] = time.sleep) -> None:
         key = api_key if api_key is not None else os.getenv("LEBREL_API_KEY", "")
         if not isinstance(key, str) or not key.strip() or any(char in key for char in "\r\n"):
             raise ValueError("A Lebrel API key is required (argument or LEBREL_API_KEY)")
@@ -404,7 +407,11 @@ class Lebrel:
         # few minutes per route. ``allow_unverified_chain`` lets a machine without dcap-qvl proceed on the
         # binding checks alone, which is a weaker guarantee and is never the default.
         self._allow_unverified_chain = bool(allow_unverified_chain)
+        # ``allowed_compose_hashes``: the router composes accepted (this release's pinned rows of the router's
+        # RELEASES.md by default); ``None`` leaves the compose unpinned, for callers who check it themselves.
+        self._allowed_compose_hashes = None if allowed_compose_hashes is None else tuple(str(h) for h in allowed_compose_hashes)
         self._verify_attestation = _verify_attestation or _attestation.verify_attestation
+        self._sleep = _sleep
         self._attested: Dict[str, Tuple[_attestation.AttestedRouter, float]] = {}
         self.chat = _Chat(self)
 
@@ -425,19 +432,27 @@ class Lebrel:
         now = self._clock()
         if cached and cached[1] > now:
             return cached[0]
-        nonce = secrets.token_bytes(32)
-        try:
-            with self._http.stream("GET", f"{self._origin}/m/{slug}/.well-known/attestation", params={"nonce": nonce.hex()}, headers={"Accept": "application/json", "Accept-Encoding": "identity"}) as response:
-                if response.status_code != 200:
-                    raise EncryptionError("The route's attestation is unavailable" if response.status_code != 429 else "The route's machine is quoting for others; try again in a few seconds")
-                raw = _bounded_raw(response, _attestation.MAX_DOCUMENT_BYTES)
-        except httpx.HTTPError:
-            raise TransportError("Could not retrieve the route's attestation") from None
+        # The machine quotes one verifier at a time: a 429 means it is quoting for others, so wait what it says
+        # (a few seconds at most) and ask again with a new nonce, three times in all.
+        for attempt in range(3):
+            nonce = secrets.token_bytes(32)
+            try:
+                with self._http.stream("GET", f"{self._origin}/m/{slug}/.well-known/attestation", params={"nonce": nonce.hex()}, headers={"Accept": "application/json", "Accept-Encoding": "identity"}) as response:
+                    if response.status_code == 429 and attempt < 2:
+                        retry_after = response.headers.get("Retry-After", "")
+                        self._sleep(min(float(retry_after) if retry_after.isdigit() else 3.0, 5.0))
+                        continue
+                    if response.status_code != 200:
+                        raise EncryptionError("The route's attestation is unavailable" if response.status_code != 429 else "The route's machine is quoting for others; try again in a few seconds")
+                    raw = _bounded_raw(response, _attestation.MAX_DOCUMENT_BYTES)
+                    break
+            except httpx.HTTPError:
+                raise TransportError("Could not retrieve the route's attestation") from None
         try:
             document = _json(raw)
             if not isinstance(document, dict):
                 raise _attestation.AttestationError("not a document")
-            attested = self._verify_attestation(document, nonce, allow_unverified_chain=self._allow_unverified_chain)
+            attested = self._verify_attestation(document, nonce, allow_unverified_chain=self._allow_unverified_chain, allowed_compose_hashes=self._allowed_compose_hashes)
         except _attestation.AttestationError as error:
             raise EncryptionError(f"The route's machine did not prove what it claims: {error}") from None
         except (ValueError, TypeError):
@@ -456,7 +471,8 @@ class Lebrel:
         except httpx.HTTPError:
             raise TransportError("Could not retrieve the route's encryption configuration") from None
         verified = verify_metadata(raw, attested.receipt_public_key, self._clock(), model_id=model)
-        if verified.key_id != attested.encryption_key_id:
+        # The key the document carries must be the very key the quote binds, compared as key bytes, not as text.
+        if verified.identity.public_key_bytes() != attested.encryption_public_key or verified.key_id != attested.encryption_key_id:
             raise EncryptionError("The route's encryption key is not the one its attestation binds")
         return verified
 
@@ -475,6 +491,12 @@ class Lebrel:
             plaintext = json.dumps(dict(parameters, model=model, messages=messages, stream=stream), ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
         except (ValueError, TypeError, UnicodeError):
             raise ValueError("Completion parameters must be valid finite JSON") from None
+        salt = b""
+        if routed:
+            # A salt of ours goes first inside the encrypted body: the router cuts it out before the lab sees the
+            # request and salts the receipt's digests with it (prompt_sha256 = SHA-256(salt || this body)).
+            salt = secrets.token_bytes(16)
+            plaintext = b'{"' + ROUTED_RECEIPT_SALT_FIELD.encode("ascii") + b'":"' + salt.hex().encode("ascii") + b'",' + plaintext[1:]
         if len(plaintext) + 20 > MAX_REQUEST_BYTES:
             raise ValueError("Completion request exceeds the encrypted request size limit")
         verified = self._routed_metadata(model, self._attested_router(model)) if routed else self._metadata()
@@ -485,7 +507,7 @@ class Lebrel:
         if encrypted is None:
             raise EncryptionError("An encrypted request body is required")
         request_id = str(uuid.uuid4())
-        request_sha256 = hashlib.sha256(plaintext).hexdigest()
+        request_sha256 = hashlib.sha256(salt + (b"{" + plaintext.split(b",", 1)[1] if salt else plaintext)).hexdigest()
         request = self._http.build_request("POST", self._origin + "/v1/chat/completions", headers={
             "Authorization": "Bearer " + self._key,
             "Content-Type": "application/octet-stream",
