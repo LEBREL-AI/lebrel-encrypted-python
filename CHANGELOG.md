@@ -2,8 +2,16 @@
 
 All notable changes to `lebrel-encrypted`. Versions follow [Semantic Versioning](https://semver.org/).
 
-## 0.5.0 — 2026-11-04
+## 0.5.0 — 2026-11-05
 
+- Pinned to router 1.3.5 (LEBREL-AI/router, tag `v1.3.5`, image
+  `sha256:b31316b3d211ded8cf320a87f8c02334f787cd0b9113560274e98eeb8800345a`): the measured compose
+  of the router that serves a route must be one of `675613867a396b1a453c8d6315b48b343fc57aa41ee4693a701075bb8a65b58a`
+  (router-tee.lebrel.ai) or `dabc6a3469d4d9c773e273479397906b4bd1737f437b107a90d1a3ef6df85383` (the
+  replica), the rows of that version in the router's RELEASES.md. A later router release needs a
+  client release with its composes, or `allowed_compose_hashes` passed by hand after checking the
+  ledger. Every routed request carries a salt and the moment of sending inside the ciphertext, as
+  router 1.3.3 and later require.
 - Routed models (DeepSeek, GLM, Kimi and Qwen through Lebrel) are encrypted end to end, like the
   edition: `create(model="deepseek/deepseek-v4.1-flash", ...)` attests the router that serves the
   route, verifies the route's signed key document with the receipt key the hardware quote binds,

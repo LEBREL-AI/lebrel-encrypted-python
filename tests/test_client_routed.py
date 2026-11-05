@@ -298,7 +298,7 @@ def test_a_routed_receipt_is_refused_explicitly_by_this_release():
             c.receipt("req_0123456789abcdef0123456789abcdef")
 
 
-def test_a_routed_stream_carries_the_routers_request_id_and_an_edition_stream_does_not():
+def test_a_routed_stream_carries_the_routers_request_id_and_its_salt():
     def handler(request):
         if request.url.path.endswith("/attestation"):
             return streamed(200, {"kind": "lebrel-router-attestation"})
