@@ -53,11 +53,14 @@ TD_REPORT10_SIZE = 584
 TEE_TYPE_TDX = 0x81
 MAX_DOCUMENT_BYTES = 512 * 1024
 
-# Lebrel's router app on Phala Cloud (dstack): the app id every row of the router's RELEASES.md
-# runs under, the KMS that derives its keys, and the OS measurements as observed on its quotes.
-PINNED_APP_ID = "4d72eae647c67ad42c972d24175d7c32ce9c871a"
-PINNED_KMS_ID = ("3059301306072a8648ce3d020106082a8648ce3d030107034200048844eb42ccdf8c52fd4f174f362fcb9bbd19c45fd48f1edec2d8f1ca2"
-                 "3536ec1a74021b4cee610c074f8294d431b2b7fee2c39e5333fdaf0a4522d43fb159d9f")
+# Lebrel's router app on Phala Cloud (dstack) since 6 November 2026: the app created under Phala's
+# replacement KMS ("Phala KMS 2026-11") after the platform incident of that day, the KMS that derives
+# its keys, and the OS measurements as observed on its quotes. The earlier app (4d72eae6…, rows 1.1.0
+# to 1.3.7 of the router's RELEASES.md) is retired: its keys were derived under the KMS whose root
+# key may have leaked, and this release no longer accepts it.
+PINNED_APP_ID = "40b35a054d2eff752b1b5c3e4dee7253ab941f68"
+PINNED_KMS_ID = ("3059301306072a8648ce3d020106082a8648ce3d03010703420004e8e325a477b0bf22800dc927a46c68638938d283fe73d1"
+                 "f9028eeac7028193f3470122193875f598b7addc503e534712ab437b4120776bbac32ddf8897f844ee")
 PINNED_OS = {
     "os_image_hash": "ec43cb8c5e04b6bb6c53b33b16076a01d83d01f7f4b703f2f78a0d947d6247e6",
     "mr_td": "2a674327c50218dba880066b349b8d559d749ed68dce33fd651c184a877d084b07a9e583767a7ad5da13ed91deec2b70",
@@ -68,14 +71,9 @@ PINNED_OS = {
 
 
 # The router composes this release knows: the rows of https://github.com/LEBREL-AI/router/blob/main/RELEASES.md
-# deployed when it was published (instance A, the attested endpoint attested.lebrel.ai, and the replica).
+# deployed under the pinned app when it was published (instance A2, the attested endpoint attested.lebrel.ai).
 PINNED_COMPOSE_HASHES: Tuple[str, ...] = (
-    "15bd7be7b090da7b83859cfbe8f3277cf05cc67c1cf249486801159222939e54",  # 1.3.7, instance A (attested.lebrel.ai, TLS in the router)
-    "2ba084cd6a4bb044e6a03a4d2a7902bb7ae7b88a52e4ff707fd9681a63b7b663",  # 1.3.7, the replica
-    "aa4f6387441feb40048718db273a58ab4c0457d8832580fbaff0470d9f44d835",  # 1.3.6, instance A (router-tee.lebrel.ai)
-    "380bf44b9121927380ff25aa63ae0b787dfdce171de69e830ae4ccf4878205c5",  # 1.3.6, the replica
-    "675613867a396b1a453c8d6315b48b343fc57aa41ee4693a701075bb8a65b58a",  # 1.3.5, instance A (router-tee.lebrel.ai)
-    "dabc6a3469d4d9c773e273479397906b4bd1737f437b107a90d1a3ef6df85383",  # 1.3.5, the replica
+    "2bcd6faeb21e6c6edb805f923107bca8f3a210a04049361ecce355d2f9316465",  # 1.3.7, instance A2 (attested.lebrel.ai, TLS in the router; Phala KMS 2026-11)
 )
 
 

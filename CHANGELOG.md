@@ -2,6 +2,17 @@
 
 All notable changes to `lebrel-encrypted`. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.5.3 — 2026-11-10
+
+- Pinned to the router's new app on Phala Cloud, created under Phala's replacement KMS ("Phala KMS 2026-11")
+  after the platform incident of 6 November 2026: app id `40b35a054d2eff752b1b5c3e4dee7253ab941f68`, the replacement
+  KMS as the key provider, compose hash `2bcd6faeb21e6c6edb805f923107bca8f3a210a04049361ecce355d2f9316465` (router 1.3.7, instance A2,
+  the attested endpoint `attested.lebrel.ai`; same image `sha256:ad3f533f…`, same OS measurements). The
+  earlier app (`4d72eae647c67ad42c972d24175d7c32ce9c871a`, every row from 1.1.0 to 1.3.7) is no longer
+  accepted: its keys were derived under the KMS whose root key may have leaked, so an attestation or a
+  receipt of those instances no longer verifies with this release. The new machine serves
+  `attested.lebrel.ai` since 10 November 2026 21:19 UTC. Nothing else changed.
+
 ## 0.5.2 — 2026-11-06
 
 - Pinned to router 1.3.7 (LEBREL-AI/router, tag `v1.3.7`, image
