@@ -2,6 +2,20 @@
 
 All notable changes to `lebrel-encrypted`. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.5.2 — 2026-11-06
+
+- Pinned to router 1.3.7 (LEBREL-AI/router, tag `v1.3.7`, image
+  `sha256:ad3f533f0b7fd67b8df9cbf407a9cfb54c90f10c67fa8bd9a01c458bec52bd35`): compose hashes
+  `15bd7be7b090da7b83859cfbe8f3277cf05cc67c1cf249486801159222939e54` (instance A, now the attested endpoint
+  `attested.lebrel.ai`, where TLS ends in the router itself) and
+  `2ba084cd6a4bb044e6a03a4d2a7902bb7ae7b88a52e4ff707fd9681a63b7b663` (the replica). Router 1.3.7 serves
+  every model, Lebrel's edition included, to any OpenAI-format client at `https://attested.lebrel.ai/v1`,
+  and the Anthropic Messages and OpenAI Responses formats at the same base; the local proxy of this
+  package is no longer needed for that and is no longer documented by Lebrel. The 1.3.6 and 1.3.5
+  composes stay pinned.
+- Note: the receipt keys of router releases 1.1.0 to 1.3.6 are not to be trusted for anything signed after
+  6 November 2026 02:00 UTC (Phala Cloud's platform incident; see the router's RELEASES.md).
+
 ## 0.5.1 — 2026-11-06
 
 - Pinned to router 1.3.6 as well (LEBREL-AI/router, tag `v1.3.6`, image
