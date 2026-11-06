@@ -2,6 +2,14 @@
 
 All notable changes to `lebrel-encrypted`. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.5.1 — 2026-11-06
+
+- Pinned to router 1.3.6 as well (LEBREL-AI/router, tag `v1.3.6`, image
+  `sha256:d3725f05e6017caee09adeb431c2b2e3d70b010c92cfc99f8bb4c55bd26c8b54`): compose hashes
+  `aa4f6387441feb40048718db273a58ab4c0457d8832580fbaff0470d9f44d835` (instance A, router-tee.lebrel.ai) and
+  `380bf44b9121927380ff25aa63ae0b787dfdce171de69e830ae4ccf4878205c5` (the replica). Router 1.3.6 changes only
+  the routes' prices (Lebrel's published rates, contract router-v3); the 1.3.5 composes stay pinned.
+
 ## 0.5.0 — 2026-11-05
 
 - Pinned to router 1.3.5 (LEBREL-AI/router, tag `v1.3.5`, image
