@@ -8,7 +8,7 @@ import zipfile
 def build():
     root = Path(__file__).resolve().parent
     paths = [root / name for name in (
-        "pyproject.toml", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md",
+        "pyproject.toml", "README.md", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md",
         "VENDORED_SHA256.json", "build_archive.py",
     )]
     for folder in ("src", "examples", "tests"):
@@ -16,6 +16,8 @@ def build():
             if not path.is_file() or path.is_symlink() or "__pycache__" in path.parts:
                 continue
             if path.suffix in (".py", ".go") or path.name in ("py.typed", "LICENSE", "go.mod", "go.sum"):
+                paths.append(path)
+            elif path.suffix == ".json" and "fixtures" in path.parts:  # what the tests read
                 paths.append(path)
     output = root / "dist" / "lebrel-encrypted-python.zip"
     output.parent.mkdir(exist_ok=True)
