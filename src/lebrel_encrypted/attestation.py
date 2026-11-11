@@ -73,6 +73,7 @@ PINNED_OS = {
 # The router composes this release knows: the rows of https://github.com/LEBREL-AI/router/blob/main/RELEASES.md
 # deployed under the pinned app when it was published (instance A2, the attested endpoint attested.lebrel.ai).
 PINNED_COMPOSE_HASHES: Tuple[str, ...] = (
+    "b7a8b290d061e36d6f92ee461acf094d87bafdcc90e65abd6e3f4d5d72012ded",  # 1.3.8, instance A2 (attested.lebrel.ai; serving since 11 November 2026)
     "2bcd6faeb21e6c6edb805f923107bca8f3a210a04049361ecce355d2f9316465",  # 1.3.7, instance A2 (attested.lebrel.ai, TLS in the router; Phala KMS 2026-11)
 )
 

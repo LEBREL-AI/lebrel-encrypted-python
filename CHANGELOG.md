@@ -2,6 +2,13 @@
 
 All notable changes to `lebrel-encrypted`. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.5.4 — 2026-11-11
+
+- Pinned to router 1.3.8 as well: compose hash `b7a8b290d061e36d6f92ee461acf094d87bafdcc90e65abd6e3f4d5d72012ded`
+  (instance A2, the attested endpoint `attested.lebrel.ai`, serving since 11 November 2026). Router 1.3.8 adds
+  Kimi K3.1 Pro as a routed model (`moonshotai/kimi-k3.1-pro`) and sends a request for token probabilities
+  (`logprobs`) on DeepSeek V4 Pro to DeepSeek's own API. The 1.3.7 compose stays accepted. Nothing else changed.
+
 ## 0.5.3 — 2026-11-10
 
 - Pinned to the router's new app on Phala Cloud, created under Phala's replacement KMS ("Phala KMS 2026-11")

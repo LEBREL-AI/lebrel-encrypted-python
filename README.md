@@ -205,9 +205,9 @@ verification remains enabled.
 
 ## Routed models, encrypted to the attested router
 
-The models Lebrel routes to their labs (`deepseek/deepseek-v4.1-flash`, `deepseek/deepseek-v4-pro`,
-`z-ai/glm-5.3`, `z-ai/glm-5.3-flash`, `moonshotai/kimi-k3`, `qwen/qwen3.8-max`, `qwen/qwen3.8-flash`)
-are served by Lebrel's router inside an Intel TDX confidential VM. The client asks that machine for
+The models Lebrel routes (`deepseek/deepseek-v4.1-flash`, `deepseek/deepseek-v4-pro`, `z-ai/glm-5.3`,
+`z-ai/glm-5.3-flash`, `moonshotai/kimi-k3`, `moonshotai/kimi-k3.1-pro`, `qwen/qwen3.8-max`, `qwen/qwen3.8-flash`)
+are served through Lebrel's router inside an Intel TDX confidential VM. The client asks that machine for
 a quote with a fresh nonce, verifies it in your process (see `lebrel_encrypted.attestation`), checks
 that the route's key document is signed by the receipt key the quote binds and names the encryption
 key the quote binds, and only then encrypts your request to it. Nothing between you and the router
