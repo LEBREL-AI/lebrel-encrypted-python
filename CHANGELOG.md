@@ -2,6 +2,16 @@
 
 All notable changes to `lebrel-encrypted`. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.5.5 — 2026-11-16
+
+- Pinned to router 1.4.0 and 1.3.9: compose hashes `a3adaa9e2bb1c45bb3f4eea3a6fa1945265b50646552833db5fbc3ab30a5d69d`
+  (1.4.0, serving since 16 November 2026 20:17 UTC) and `4830ccd86b255d53227ddfa49ea94875e46c711d355ca80564809a25936952df`
+  (1.3.9, 16 November 2026 03:23 to 20:15 UTC), both instance A2, the attested endpoint `attested.lebrel.ai`. Router
+  1.3.9 adds Qwen4 Max as a routed model and asks a busy route again before the customer is told; router 1.4.0 takes
+  images and documents in the Anthropic Messages and OpenAI Responses formats, lists each model's input modalities, and
+  serves the edition with its own output limit (393,216 tokens). Releases 0.5.4 and older refuse routed models since
+  1.3.9: upgrade with `pip install -U lebrel-encrypted`. The 1.3.8 and 1.3.7 composes stay accepted. Nothing else changed.
+
 ## 0.5.4 — 2026-11-11
 
 - Pinned to router 1.3.8 as well: compose hash `b7a8b290d061e36d6f92ee461acf094d87bafdcc90e65abd6e3f4d5d72012ded`
